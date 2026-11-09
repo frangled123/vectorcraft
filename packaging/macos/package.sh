@@ -38,7 +38,10 @@ esac
 export MACOSX_DEPLOYMENT_TARGET=11.0
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 SHORT_VERSION="${VERSION%%-*}"
-WORK="$CARGO_TARGET_DIR/macos-package"
+# Stage outside synced source/build folders: file providers can reattach FinderInfo
+# after signing and invalidate an otherwise intact app bundle.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/nodus-package.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
 APP="$WORK/Nodus.app"
 DMG="$DIST/nodus-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/nodus-cli-$VERSION-macos-$ARCH.zip"
