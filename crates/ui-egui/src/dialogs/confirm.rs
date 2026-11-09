@@ -55,7 +55,10 @@ pub(crate) fn ask_replace(app: &mut VectorcraftApp, path: &str, typed: &str) {
     let typed = vectorcraft_engine::cmd::fileio::file_name(typed);
     let message = crate::i18n::fmt(tl!("“{name}” already exists. Replace it?"), &[("name", &name)]);
     let detail = crate::i18n::fmt(
-        tl!("The name in the save panel was “{typed}”; VectorCraft added the file type's extension. Replacing the file overwrites its contents."),
+        crate::branding::text(tl!(
+            "The name in the save panel was “{typed}”; VectorCraft added the file type's extension. Replacing the file overwrites its contents."
+        ))
+        .as_ref(),
         &[("typed", &typed)],
     );
     let under = app.ui.dialog.take().and_then(|d| serde_json::to_value(d).ok());

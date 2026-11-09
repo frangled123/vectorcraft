@@ -23,6 +23,9 @@ grep -q 'viewBox="-62.136' "$MAC" || { echo "error: $SVG has no 512 viewBox" >&2
 
 render() { resvg -w "$2" -h "$2" "$1" "$3" </dev/null; }
 
+# In-app marks follow the UI appearance, independently of the macOS Dock setting.
+render "$DIR/vectorcraft-dark.svg" 128 "$DIR/vectorcraft-dark-128.png"
+
 render "$SVG" 1024 "$DIR/vectorcraft-1024.png"
 # Runtime window/Dock icon on macOS (embedded by apps/vectorcraft/src/main.rs).
 render "$MAC" 512 "$DIR/vectorcraft-macos-512.png"

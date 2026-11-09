@@ -1,12 +1,8 @@
-VectorCraft app icon (vectorcraft.svg, vectorcraft-small.svg and every file derived from them in this
-directory: vectorcraft-1024.png, vectorcraft-macos-512.png, vectorcraft.icns, vectorcraft.ico, hicolor/).
+Original ribbon artwork created for frangled123's independent macOS ARM forks, 2026.
+Concept images were generated for the fork owner and reconstructed as editable SVG paths.
+No third-party product artwork is included in these ribbons.
 
-Original artwork made for this project by the project owner, drawn in ArtCraft and vectorised for
-VectorCraft (no third-party material). Licensed like the rest of VectorCraft, under either of
-
-  * Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
-  * MIT license (https://opensource.org/licenses/MIT)
-
-at your option.
-
-Regenerate the derived files with packaging/icons.sh.
+Copyright (c) 2026 frangled123.
+Licensed under either MIT or Apache-2.0, at your option. See LICENSE-MIT and LICENSE-APACHE
+at the repository root. This permission covers the ribbon SVGs, Icon Composer sources,
+and PNG, ICNS and ICO renders derived from them.

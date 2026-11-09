@@ -9,7 +9,7 @@ pub(super) fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new(tl!("About VectorCraft"))
+    egui::Window::new(crate::branding::text(tl!("About VectorCraft")).as_ref())
         .collapsible(false)
         .resizable(false)
         .open(&mut open)
@@ -52,7 +52,7 @@ fn about_tab(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
         let (r, _) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::hover());
         crate::brand::paint_mark(ui, r);
         ui.vertical(|ui| {
-            ui.label(egui::RichText::new("VectorCraft").font(theme::semibold(22.0)));
+            ui.label(egui::RichText::new("Nodus").font(theme::semibold(22.0)));
             ui.label(crate::i18n::fmt(
                 tl!("Version {version} — open-source vector illustration in pure Rust."),
                 &[("version", env!("CARGO_PKG_VERSION"))],
@@ -61,10 +61,19 @@ fn about_tab(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
     });
     ui.add_space(12.0);
     crate::community::links(app, ui);
+    ui.horizontal(|ui| {
+        let (uri, bytes): (&str, &'static [u8]) = if ui.visuals().dark_mode {
+            ("bytes://ribbon-mark-dark.png", include_bytes!("../../../../docs/brand/ribbon-mark-dark.png"))
+        } else {
+            ("bytes://ribbon-mark-light.png", include_bytes!("../../../../docs/brand/ribbon-mark-light.png"))
+        };
+        ui.add(egui::Image::from_bytes(uri, bytes).fit_to_exact_size(egui::vec2(28.0, 28.0)).alt_text("Independent ribbon suite"));
+        ui.label(tl!("Independent macOS ARM build"));
+    });
     ui.add_space(12.0);
     ui.label(
         egui::RichText::new(tl!(
-            "Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft."
+            "Based on upstream VectorCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft."
         ))
         .size(11.0),
     );

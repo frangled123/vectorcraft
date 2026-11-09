@@ -184,7 +184,7 @@ pub fn display_label(app: &VectorcraftApp, id: &str, label: &str) -> String {
         },
         _ => {
             let shown = dynamic_label(app, id, label);
-            if shows_a_name(id, &shown) { shown } else { crate::i18n::tr_id(lang, id, &shown).to_string() }
+            if shows_a_name(id, &shown) { shown } else { crate::branding::menu_text(id, crate::i18n::tr_id(lang, id, &shown)).into_owned() }
         }
     }
 }

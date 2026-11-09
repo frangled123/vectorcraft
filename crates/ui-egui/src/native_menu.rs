@@ -38,7 +38,7 @@ use crate::i18n::{Lang, tr, tr_ctx};
 use crate::menus::{self, Entry};
 use crate::theme::Brightness;
 
-pub const APP_NAME: &str = "VectorCraft";
+pub const APP_NAME: &str = "Nodus";
 /// Hide VectorCraft: an item of ours (AppKit's always takes ⌘H, which is View › Hide Edges).
 pub const HIDE: &str = "app.hide";
 /// Hide Others: an item of ours, so a command bound to ⌥⌘H keeps it.
@@ -130,7 +130,15 @@ impl Item {
     /// An item of the layout's own (Hide, Minimize…): always enabled, `shortcut` unless a command
     /// has it.
     fn system(command: &'static str, source: &'static str, shortcut: Option<&'static str>, lang: Lang) -> Item {
-        Item { command: Some(command), params: Value::Null, source, label: tr(lang, source).into(), shortcut, enabled: true, checked: None }
+        Item {
+            command: Some(command),
+            params: Value::Null,
+            source,
+            label: crate::branding::text(tr(lang, source)).into_owned(),
+            shortcut,
+            enabled: true,
+            checked: None,
+        }
     }
 }
 
@@ -193,7 +201,7 @@ pub fn from_tree(app: &VectorcraftApp, tree: &[(&'static str, Vec<menus::Item>)]
                 "Help" => MenuRole::Help,
                 _ => MenuRole::Normal,
             };
-            Menu { title: crate::i18n::t(title).to_string(), role, children: level(app, items) }
+            Menu { title: crate::branding::text(crate::i18n::t(title)).into_owned(), role, children: level(app, items) }
         })
         .collect();
     MenuBar { menus }
@@ -346,7 +354,7 @@ pub fn mac_layout(app: &VectorcraftApp, bar: &MenuBar, lang: Lang) -> Layout {
     app.extend([Node::Item(hide), Node::Item(hide_others), Node::Standard(Standard::ShowAll), Node::Separator]);
     // Quit is File › Exit in the window; in the App menu it reads as a Mac Quit item.
     app.extend(quit.map(|mut q| {
-        q.label = tr(lang, "Quit VectorCraft").into();
+        q.label = crate::branding::text(tr(lang, "Quit VectorCraft")).into_owned();
         Node::Item(q)
     }));
     bar.menus.insert(0, Menu { title: APP_NAME.into(), role: MenuRole::App, children: app });

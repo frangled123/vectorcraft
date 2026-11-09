@@ -21,6 +21,7 @@
 //! keyboard isn't confined.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
+mod app_icon;
 mod automation_args;
 mod caps_lock;
 mod clipboard;
@@ -443,7 +444,7 @@ fn main() -> std::process::ExitCode {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            eframe::run_native("VectorCraft", options, app_creator)
+            eframe::run_native("Nodus", options, app_creator)
         }
     };
     let outcome = vectorcraft_engine::guard::catch_panic(|| {

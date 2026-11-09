@@ -10,7 +10,7 @@ fn app_icon() -> egui::IconData {
     let png: &[u8] = include_bytes!("../../../assets/app-icon/vectorcraft-macos-512.png");
     #[cfg(not(target_os = "macos"))]
     let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.vectorcraft.png");
-    eframe::icon_data::from_png_bytes(png).unwrap_or_default()
+    super::app_icon::viewport_icon(std::env::current_exe().ok().as_deref(), png)
 }
 
 /// Windows shows a window's big icon (`ICON_BIG`) in the taskbar and Alt+Tab; eframe sets only the
@@ -166,7 +166,7 @@ pub(crate) fn custom_titlebar(saved: Option<&vectorcraft_ui_egui::UiState>) -> b
 pub(crate) fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("VectorCraft")
+            .with_title("Nodus")
             .with_inner_size(window::DEFAULT_SIZE)
             .with_min_inner_size(window::MIN_SIZE)
             .with_drag_and_drop(true)

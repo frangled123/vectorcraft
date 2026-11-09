@@ -146,3 +146,9 @@ Indic hyphenation patterns (crates/text/patterns/):
 Copyright (C) 2016 Santhosh Thottingal, used under the MIT license option.
 Original copyright and full license notices are preserved in each hyph-*.tex file.
 Source: hyphenation/tex-hyphen, commit 5684c0f51c0b81133db2efbe60a408b4155a3ff5.
+
+Independent fork artwork
+
+The upstream ArtCraft trademark graphics have been removed from this fork. Original ribbon
+artwork is copyright (c) 2026 frangled123, MIT OR Apache-2.0. See assets/app-icon/LICENSE.txt
+and docs/brand/LICENSE-ribbon.txt. Original code and third-party notices above are retained.

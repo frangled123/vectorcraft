@@ -9,8 +9,13 @@
 /// prompt shows both, and an AppImage's menu entry gets the icon.
 #[cfg(not(target_arch = "wasm32"))]
 pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
+    repo: "frangled123/vectorcraft",
+    name: "Nodus",
+    former_names: &["VectorCraft"],
+    former_ids: &["nodus"],
+    developer: "frangled123 (independent fork)",
     icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.vectorcraft.png")),
-    accent: Some([0xe8, 0x57, 0x3f]),
+    accent: Some([0x90, 0x62, 0xe6]),
     ..craft_update::suite::VECTORCRAFT
 };
 
@@ -25,6 +30,7 @@ macro_rules! tl {
 pub mod addons;
 pub mod background;
 mod brand;
+pub mod branding;
 pub mod canvas;
 pub mod chrome;
 mod clipboard_probe;

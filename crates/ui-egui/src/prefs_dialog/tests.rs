@@ -258,7 +258,7 @@ fn graphics_processor_preference_shows_and_persists() {
     out.shapes.iter().for_each(|c| texts(&c.shape, &mut shown));
     assert!(shown.iter().any(|t| t.starts_with("Graphics Processor")), "{shown:?}");
     assert!(shown.iter().any(|t| t == "Automatic"), "{shown:?}");
-    assert!(shown.iter().any(|t| t == "Applies the next time VectorCraft starts."), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "Applies the next time Nodus starts."), "{shown:?}");
     a.ui.dialog.as_mut().unwrap().fields.insert("gpuPreference".into(), json!("highPerformance"));
     assert!(!a.take_prefs_changed(), "nothing to write before OK");
     confirm(&mut a).unwrap();
@@ -293,7 +293,7 @@ fn system_title_bar_preference_shows_and_persists() {
     out.shapes.iter().for_each(|c| texts(&c.shape, &mut shown));
     let supported = cfg!(all(not(target_arch = "wasm32"), not(target_os = "macos")));
     assert_eq!(shown.iter().any(|t| t == "System Title Bar"), supported, "{shown:?}");
-    assert_eq!(shown.iter().any(|t| t == "Applies the next time VectorCraft starts."), supported, "{shown:?}");
+    assert_eq!(shown.iter().any(|t| t == "Applies the next time Nodus starts."), supported, "{shown:?}");
     a.ui.dialog.as_mut().unwrap().fields.insert("systemTitleBar".into(), json!(true));
     confirm(&mut a).unwrap();
     assert!(a.session.prefs.system_title_bar);
@@ -325,7 +325,7 @@ fn app_title_bar_preference_shows_and_persists() {
     out.shapes.iter().for_each(|c| texts(&c.shape, &mut shown));
     let supported = cfg!(not(any(target_arch = "wasm32", target_os = "macos", target_os = "windows")));
     assert_eq!(shown.iter().any(|t| t == "VectorCraft Title Bar on Every Desktop"), supported, "{shown:?}");
-    let notes = shown.iter().filter(|t| *t == "Applies the next time VectorCraft starts.").count();
+    let notes = shown.iter().filter(|t| *t == "Applies the next time Nodus starts.").count();
     assert_eq!(notes, usize::from(cfg!(all(not(target_arch = "wasm32"), not(target_os = "macos")))), "{shown:?}");
     a.ui.dialog.as_mut().unwrap().fields.insert("appTitleBar".into(), json!(true));
     confirm(&mut a).unwrap();
@@ -349,7 +349,7 @@ fn app_title_bar_is_dimmed_while_something_takes_precedence() {
     }
     let note = "The VECTORCRAFT_TITLEBAR environment variable chooses the title bar while it is set.";
     let system_note = "System Title Bar takes precedence over this option while it is on.";
-    let restart_note = "Applies the next time VectorCraft starts.";
+    let restart_note = "Applies the next time Nodus starts.";
     let supported = cfg!(not(any(target_arch = "wasm32", target_os = "macos", target_os = "windows")));
     for (from_env, system) in [(false, false), (true, false), (false, true), (true, true)] {
         let mut a = app();
