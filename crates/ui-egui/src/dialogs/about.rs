@@ -62,18 +62,13 @@ fn about_tab(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
     ui.add_space(12.0);
     crate::community::links(app, ui);
     ui.horizontal(|ui| {
-        let (uri, bytes): (&str, &'static [u8]) = if ui.visuals().dark_mode {
-            ("bytes://ribbon-mark-dark.png", include_bytes!("../../../../docs/brand/ribbon-mark-dark.png"))
-        } else {
-            ("bytes://ribbon-mark-light.png", include_bytes!("../../../../docs/brand/ribbon-mark-light.png"))
-        };
-        ui.add(egui::Image::from_bytes(uri, bytes).fit_to_exact_size(egui::vec2(28.0, 28.0)).alt_text("Independent ribbon suite"));
-        ui.label(tl!("Independent macOS ARM build"));
+        crate::brand::suite_mark(ui, 28.0);
+        ui.label(crate::branding::fork_label("Independent macOS ARM build"));
     });
     ui.add_space(12.0);
     ui.label(
-        egui::RichText::new(tl!(
-            "Based on upstream VectorCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft."
+        egui::RichText::new(crate::branding::fork_label(
+            "Based on upstream VectorCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.",
         ))
         .size(11.0),
     );
