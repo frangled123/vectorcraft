@@ -3,11 +3,36 @@
   "source_sha": "6ce5e9449531227e4cb83e6ce93fa97a7f09da34",
   "version": "0.24.2",
   "trigger": "refs/tags/fork-release/v0.24.2-attempt.1",
-  "status": "running",
+  "status": "failure",
   "run_id": "43386142658",
   "run_attempt": "1",
   "run_url": "https://github.com/frangled123/vectorcraft/actions/runs/43386142658",
-  "updated_utc": "2026-11-13T07:30:26.217967+00:00",
-  "steps": {},
+  "updated_utc": "2026-11-13T07:41:08.809785+00:00",
+  "steps": {
+    "source": {
+      "outcome": "success",
+      "conclusion": "success"
+    },
+    "inputs": {
+      "outcome": "success",
+      "conclusion": "success"
+    },
+    "translations": {
+      "outcome": "failure",
+      "conclusion": "failure"
+    },
+    "build": {
+      "outcome": "skipped",
+      "conclusion": "skipped"
+    },
+    "packages": {
+      "outcome": "skipped",
+      "conclusion": "skipped"
+    },
+    "release": {
+      "outcome": "skipped",
+      "conclusion": "skipped"
+    }
+  },
   "assets": []
 }
