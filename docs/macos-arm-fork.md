@@ -6,7 +6,7 @@ This fork is maintained in `macos-arm64`, based on [storytold/vectorcraft](https
 
 `packaging/fork/release-inputs.json` records the previous fork commit, exact upstream commit, Rust version, public font/translation input revisions, and protected artwork Git blobs. `python3 packaging/fork/verify-source.py` checks the worktree artwork; the release workflow additionally proves both commits are ancestors of the exact reviewed source SHA. Attribution and code changes are reviewed separately from those artwork bytes.
 
-The UI supports 28 languages including English. Simplified and Traditional Chinese follow the system display language or the application's explicit language setting. PDF and Photo translations are compiled from their pinned `craft-i18n.rev` plus the committed `crates/ui-egui/src/i18n/fork/*.tsv`; the external checkout is never modified. Vector translations remain in its own catalogs. The build and runtime tests verify the actual embedded Chinese rows, including placeholders and plural forms. Software names, authors and licence texts retain their proper identities; source and update links use this fork.
+The UI supports 28 languages including English. Simplified and Traditional Chinese follow the system display language or the application's explicit language setting. Nodus interface translations remain in its committed catalogs. Its `craft-i18n.rev` pins the shared proofing library's spelling and hyphenation data, not a replacement interface catalog. The external checkout is never modified. Build and runtime tests verify the embedded Chinese rows and placeholders. Software names, authors and licence texts retain their proper identities; source and update links use this fork.
 
 ## Free GitHub build and release
 
@@ -27,7 +27,7 @@ The packages are ad-hoc signed and not notarized. macOS may require its explicit
 
 ## Manual build
 
-On an Apple Silicon Mac with Xcode 26 and the pinned Rust version, set absolute `CRAFT_FONTS_DIR` and (for PDF/Photo) `CRAFT_I18N_DIR` paths to the verified pinned checkouts. Set `CRAFT_FONTS_REQUIRED=1` and `CRAFT_I18N_REQUIRED=1`, then run `packaging/macos/build-arm-local.sh`. No build on the user's Mac is required for this release workflow.
+On an Apple Silicon Mac with Xcode 26 and the pinned Rust version, set absolute `CRAFT_FONTS_DIR` and `CRAFT_I18N_DIR` paths to the verified pinned checkouts. Nodus keeps its own interface catalogs, but the shared proofing library requires the pinned `craft-i18n` Language data. Both input-required flags are enforced by the ARM wrapper. Run `packaging/macos/build-arm-local.sh`. No build on the user's Mac is required for this release workflow.
 
 ## Future updates
 

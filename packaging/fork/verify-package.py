@@ -41,6 +41,15 @@ def licences(directory):
     for name in ('LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE'):
         assert (directory/name).is_file(), name
     assert list(directory.rglob('OFL-*.txt')), 'missing embedded font licences'
+    data = Path(os.environ['CRAFT_I18N_DIR'])
+    notices = directory/'licenses/language-data'
+    assert (notices/'ATTRIBUTION.md').read_bytes() == (data/'ATTRIBUTION.md').read_bytes()
+    assert (notices/'README.md').read_bytes() == (data/'language-data/README.md').read_bytes()
+    for name in ('LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE'):
+        if (data/name).is_file():
+            assert (notices/name).read_bytes() == (data/name).read_bytes()
+    for source in [*(data/'language-data').glob('*/LICENCE*'), *(data/'language-data').glob('*/hyphenation.pat')]:
+        assert (notices/source.relative_to(data/'language-data')).read_bytes() == source.read_bytes()
 
 assert dmg.is_file() and archive.is_file()
 signature(dmg)

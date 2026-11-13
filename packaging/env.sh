@@ -55,6 +55,26 @@ copy_docs() {
     cp -R "$ROOT/licenses/." "$dest/licenses/"
   fi
   copy_font_licences "$dest"
+  copy_language_licences "$dest"
+}
+
+# The shared proofing library embeds dictionaries and hyphenation patterns even though
+# this app's interface catalogs stay in its source tree. Keep the upstream notices,
+# attribution and the original pattern files (which contain their own notices).
+copy_language_licences() {
+  local dest="$1/licenses/language-data" file locale
+  [[ -n "${CRAFT_I18N_DIR:-}" ]] || return 0
+  mkdir -p "$dest"
+  for file in ATTRIBUTION.md LICENSE LICENSE-MIT LICENSE-APACHE; do
+    [[ ! -f "$CRAFT_I18N_DIR/$file" ]] || cp "$CRAFT_I18N_DIR/$file" "$dest/"
+  done
+  cp "$CRAFT_I18N_DIR/language-data/README.md" "$dest/README.md"
+  for file in "$CRAFT_I18N_DIR"/language-data/*/LICENCE* "$CRAFT_I18N_DIR"/language-data/*/hyphenation.pat; do
+    [[ -f "$file" ]] || continue
+    locale="$(basename "$(dirname "$file")")"
+    mkdir -p "$dest/$locale"
+    cp "$file" "$dest/$locale/"
+  done
 }
 
 # Built with craft-fonts (CRAFT_FONTS_DIR, set by release.yml): the embedded fonts' licences go with

@@ -1,5 +1,12 @@
 # Attribution
 
+Release builds also embed the shared proofing library's Language data from
+[`storytold/craft-i18n` at `e02939ef009218e81c44e8ec001fbb7603461de4`](https://github.com/storytold/craft-i18n/tree/e02939ef009218e81c44e8ec001fbb7603461de4/language-data).
+Its file-by-file authors, sources and licences are preserved in the package under
+`licenses/language-data/ATTRIBUTION.md`, together with the original SCOWL notices,
+project licences and hyphenation pattern files containing their notices. The same
+notices accompany both the desktop application and CLI.
+
 The complete historical asset manifest is [ASSETS.md](ASSETS.md). These hyphenation assets use the MIT option, with the complete copyright and permission notices preserved in each file.
 
 | Asset | Author | Source | SPDX license | Notes |

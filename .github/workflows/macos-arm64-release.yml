@@ -72,6 +72,7 @@ jobs:
         run: |
           python3 packaging/fork/audit-i18n.py 2>&1 | tee -a "$RUNNER_TEMP/fork-public-translations.log"
           cargo fmt --all -- --check 2>&1 | tee -a "$RUNNER_TEMP/fork-public-translations.log"
+          cargo check --locked --release --target aarch64-apple-darwin -p craft-proof 2>&1 | tee -a "$RUNNER_TEMP/fork-public-translations.log"
           cargo test --locked --release --target aarch64-apple-darwin -p vectorcraft-ui-egui --lib i18n:: 2>&1 | tee -a "$RUNNER_TEMP/fork-public-translations.log"
           cargo test --locked --release --target aarch64-apple-darwin -p vectorcraft-ui-egui --lib brand 2>&1 | tee -a "$RUNNER_TEMP/fork-public-translations.log"
       - name: Build thin ARM application and CLI, with ad-hoc signatures

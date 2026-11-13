@@ -17,6 +17,7 @@ def git(*args):
 
 version = tomllib.loads((root/'Cargo.toml').read_text())['workspace']['package']['version']
 assert version == spec['version'], (version, spec['version'])
+assert (root/'craft-i18n.rev').read_text().strip() == spec['i18n']
 assert re.fullmatch(r'\d+\.\d+\.\d+', version)
 assert git('remote', 'get-url', 'origin').rstrip('/').removesuffix('.git').endswith('/'+spec['repository'])
 if '--release' in sys.argv:

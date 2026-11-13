@@ -7,7 +7,8 @@
   "upstream": "f7a03f7899e5dfa097ced6e035293d4a8b52e301",
   "rust": "1.95.0",
   "fonts": "b076417b5880bd4154bd22f00695b1d28c6bea83",
-  "i18n": null,
+  "i18n": "e02939ef009218e81c44e8ec001fbb7603461de4",
+  "language_data_tree": "2fea04996b1d4742ab9a6a971c0c278d6a574b82",
   "artwork": [
     {
       "path": "assets/app-icon/Nodus.icon/Assets/ribbon-dark.svg",

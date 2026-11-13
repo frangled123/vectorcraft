@@ -39,7 +39,10 @@ for manifest in ['manifest.txt', 'simplified-chinese-manifest.txt']:
 environment = {'CRAFT_FONTS_DIR': str(fonts), 'CRAFT_FONTS_REQUIRED': '1'}
 if spec['i18n']:
     assert (root/'craft-i18n.rev').read_text().strip() == spec['i18n']
-    environment['CRAFT_I18N_DIR'] = str(checkout('craft-i18n', spec['i18n']))
+    translations = checkout('craft-i18n', spec['i18n'])
+    language_tree = subprocess.check_output(['git', '-C', str(translations), 'rev-parse', 'HEAD:language-data'], text=True).strip()
+    assert language_tree == spec['language_data_tree'], 'unexpected proofing data tree'
+    environment['CRAFT_I18N_DIR'] = str(translations)
     environment['CRAFT_I18N_REQUIRED'] = '1'
 with open(os.environ['GITHUB_ENV'], 'a') as out:
     for key, value in environment.items():
