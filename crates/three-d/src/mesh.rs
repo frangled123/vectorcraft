@@ -56,12 +56,12 @@ impl Mesh {
 
 /// Extrude & Bevel's solid ([`crate::extrude`]) as a mesh.
 pub fn extrude_mesh(path: &PathData, rule: FillRule, bounds: Rect, options: Extrude, view: View) -> Result<Mesh, String> {
-    extrude_faces(path, rule, bounds, options, view, true).and_then(|(_, faces)| mesh(&faces))
+    extrude_faces(path, rule, bounds, options, view, true).and_then(|(_, faces, _)| mesh(&faces))
 }
 
 /// Rotate's plane ([`crate::plane`]) as a mesh.
 pub fn plane_mesh(path: &PathData, rule: FillRule, bounds: Rect, view: View) -> Result<Mesh, String> {
-    plane_faces(path, rule, bounds, view, true).and_then(|(_, faces)| mesh(&faces))
+    plane_faces(path, rule, bounds, view, true).and_then(|(_, faces, _)| mesh(&faces))
 }
 
 /// Inflate's solids for several shapes of one object ([`crate::inflate_together`]) as meshes, one
@@ -72,14 +72,15 @@ pub fn inflate_meshes(
     options: Inflate,
     view: View,
 ) -> impl Iterator<Item = Result<Mesh, String>> + use<> {
-    inflate_faces(shapes, bounds, options, view, true).map(|r| r.and_then(|(_, faces)| mesh(&faces)))
+    inflate_faces(shapes, bounds, options, view, true).map(|r| r.and_then(|(_, faces, _)| mesh(&faces)))
 }
 
 /// Revolve's surface ([`crate::revolve`]) as a mesh. As the effect draws it, a sweep of less than
-/// 360° caps its ends with sectors and leaves its two cut sides open ([`Revolve::cap_ends`]).
-pub fn revolve_mesh(path: &PathData, bounds: Rect, options: Revolve) -> Result<Mesh, String> {
+/// 360° caps its ends with sectors and leaves its two cut sides open ([`Revolve::cap_ends`]). The
+/// walls of holes under `rule`, such as the counter of an O, face into the hole.
+pub fn revolve_mesh(path: &PathData, rule: FillRule, bounds: Rect, options: Revolve) -> Result<Mesh, String> {
     let mut faces = vec![];
-    crate::revolve_faces(path, bounds, options, Some(&mut faces))?;
+    crate::revolve_faces(path, rule, bounds, options, Some(&mut faces))?;
     mesh(&faces)
 }
 

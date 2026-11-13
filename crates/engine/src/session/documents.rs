@@ -44,6 +44,8 @@ impl Session {
             fill_active: true,
             clipboard: Clipboard::default(),
             journal: Journal::default(),
+            history_budget: crate::default_history_budget(),
+            histories_seen: None,
             tool: vectorcraft_tools::create("selection"),
             lender: None,
             held_input: Default::default(),
@@ -78,12 +80,19 @@ impl Session {
             style_libraries: Default::default(),
             symbol_libraries: Default::default(),
             brush_libraries: Default::default(),
+            arrowheads: Default::default(),
+            shown_library_ids: Default::default(),
             libraries: Default::default(),
             pdf_preset_dir: None,
+            dictionary_file: None,
             profile_dir: None,
+            color_settings_file: None,
             plugin_dir: None,
-            ignored_plugin_grants: Default::default(),
+            scripts_dir: None,
+            new_doc_profile_dir: None,
             plugin_output: None,
+            plugin_install_approval: None,
+            plugin_grants_from_requests: false,
             recent_urls: vec![],
             trace_preset_changes: Default::default(),
             ui_language: None,
@@ -108,6 +117,7 @@ impl Session {
             recovery: Default::default(),
             in_tool_actions: false,
             previewing: false,
+            decoded_images: Default::default(),
             envelope_defaults: None,
             liquify_stroke: None,
             plane_widget_press: false,
@@ -116,6 +126,7 @@ impl Session {
             press_type_selection: None,
             press_point: None,
             ruler_guide: None,
+            ruler_origin: None,
             port_marks: Default::default(),
             font_search: None,
             link_search: None,
@@ -126,6 +137,16 @@ impl Session {
             link_scan: None,
             global_edit_options: Default::default(),
             keyboard_text: false,
+            script_key: None,
+            script_engines: crate::script::EnginesKey::new(),
+            script_stop: vectorcraft_js::Interrupt::new(),
+            script_report: None,
+            script_console: Default::default(),
+            script_runs: 0,
+            script_frames: false,
+            script_high_water: Default::default(),
+            script_in_run: false,
+            script_copy_first: cfg!(target_arch = "wasm32"),
         }
     }
 
@@ -284,8 +305,8 @@ impl Session {
         cmd::compositefonts::filter_loaded(&mut doc);
         // Inline graphics in text take their size from their symbols' art (not saved).
         doc.resolve_inline_art();
-        // Guides from files saved before guides had layers go on a layer.
-        doc.adopt_guides();
+        // Ruler guides a reader left in the saved list become nodes on their layers.
+        doc.guides_into_nodes();
         cmd::dimension::conform(&mut doc);
         self.reset_tool_for_doc_switch();
         let mut st = DocState::new(doc, path);
@@ -312,7 +333,7 @@ impl Session {
         doc.limit_depth();
         cmd::compositefonts::filter_loaded(&mut doc);
         doc.resolve_inline_art();
-        doc.adopt_guides();
+        doc.guides_into_nodes();
         cmd::dimension::conform(&mut doc);
         // In the back, type set in a font named like a composite font is measured when the document
         // comes to the front and its own composite fonts are registered, not in the front

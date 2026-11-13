@@ -9,6 +9,7 @@
 
 pub mod addons;
 pub mod bbox;
+pub mod blendwidget;
 pub mod builder;
 pub mod catalog;
 pub mod corners;
@@ -148,7 +149,8 @@ pub trait Tool: Send {
         false
     }
     /// Is a drag moving, scaling or rotating the selection (the canvas then hides the bounding box,
-    /// so only the art is seen going with the pointer, except during a handle resize)?
+    /// so only the art is seen going with the pointer, except during a handle resize, and during a
+    /// move with General › Show Bounding Box While Moving and Drawing on)?
     fn transforming(&self) -> bool {
         false
     }
@@ -157,9 +159,27 @@ pub trait Tool: Send {
     fn resizing(&self) -> bool {
         false
     }
+    /// Is the transforming drag a move of the selection (an Alt-drag copy included)? With General ›
+    /// Show Bounding Box While Moving and Drawing on, the canvas then draws the bounding box where
+    /// the drag has moved the selection.
+    fn moving(&self) -> bool {
+        false
+    }
+    /// Is a drag drawing a new shape that the tool shows the bounding box of once drawn? With
+    /// General › Show Bounding Box While Moving and Drawing on, the canvas then draws the box around
+    /// the shape as it is drawn.
+    fn drawing_boxed(&self) -> bool {
+        false
+    }
     /// Does the tool take `key` now, ahead of the command shortcuts bound to it (the Gradient tool
     /// with a stop selected takes Delete and the arrows)?
     fn claims_key(&self, _cx: &ToolContext, _key: ToolKey) -> bool {
+        false
+    }
+    /// Has the tool started something that Escape ends while no button is pressed (a path being
+    /// drawn, the Blend tool's first pick)? That Escape ends nothing else, such as isolation mode or
+    /// a rotated view.
+    fn ends_on_escape(&self, _cx: &ToolContext) -> bool {
         false
     }
     /// Does the tool want typed text (Type tool editing)? Single-key shortcuts are suppressed.
@@ -536,6 +556,7 @@ pub(crate) mod testutil {
             freeform_point: None,
             raster_sample: 1,
             preview_bounds: false,
+            glyph_bounds: false,
             preview_memo: None,
             unit: Unit::Points,
             stroke_unit: Unit::Points,

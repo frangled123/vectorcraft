@@ -209,7 +209,7 @@ fn reshaped_art(doc: Option<&Document>, n: &Node, hook: Option<OutlineHook>, nod
             Some(area) => Some(reshaped(&area, n, doc)),
             None => {
                 let mut m = crate::reshape::outlined_members_with(None, doc, n, outline, nodes);
-                let carry = crate::reshape::reshape_leaves_carrying(&mut m, &fx, doc);
+                let carry = crate::reshape::reshape_leaves_carrying(&mut m, &fx, &n.appearance.effects, doc);
                 // The group's own fills and strokes follow the effects as its members do.
                 if carry.moves(&m.appearance) {
                     carry.apply(&mut m.appearance);
@@ -225,7 +225,7 @@ fn reshaped_art(doc: Option<&Document>, n: &Node, hook: Option<OutlineHook>, nod
             let art = h(n).filter(|art| nodes.charge(art))?;
             let mut art = crate::reshape::symbol_art_with(&art, h, nodes, symbol);
             crate::reshape::outline_nested_text(doc, &mut art, false);
-            let carry = crate::reshape::reshape_leaves_carrying(&mut art, &fx, doc);
+            let carry = crate::reshape::reshape_leaves_carrying(&mut art, &fx, &n.appearance.effects, doc);
             // The art's own fills and strokes follow the effects as its members do.
             if carry.moves(&art.appearance) {
                 carry.apply(&mut art.appearance);
@@ -257,6 +257,9 @@ fn reshaped(src: &Node, n: &Node, doc: Option<&Document>) -> Node {
         if carry.moves(&m.appearance) {
             carry.apply(&mut m.appearance);
         }
+        // So do the raster effects of its fills and strokes, by `n`'s Transform effects
+        // ([`crate::follow_items`]).
+        crate::raster::follow_items_of(&mut m, &n.appearance.effects);
     }
     without_geometry_effects(&mut m);
     m
@@ -265,7 +268,7 @@ fn reshaped(src: &Node, n: &Node, doc: Option<&Document>) -> Node {
 fn without_geometry_effects(n: &mut Node) {
     if n.appearance.effects.iter().any(|e| crate::is_geometry(&e.id)) {
         let mut ap = (*n.appearance).clone();
-        ap.effects.retain(|e| !crate::is_geometry(&e.id));
+        ap.effects = crate::raster::without_geometry(&ap.effects);
         n.appearance = ap.into();
     }
 }
@@ -455,6 +458,17 @@ pub fn pathfinder_children(doc: Option<&Document>, group: &Node, hook: Option<Ou
         return None;
     }
     let source: &[Arc<Node>] = group.children()?;
+    // A layer's ruler guides take no part in the operation: they stay above its result.
+    let art = Node::guide_run_start(source);
+    if art < source.len() {
+        let mut without = group.clone();
+        if let Some(ch) = without.children_mut() {
+            ch.truncate(art);
+        }
+        let mut out = pathfinder_children(doc, &without, hook)?;
+        out.extend(source.iter().skip(art).cloned());
+        return Some(out);
+    }
     let mut stack: Vec<Arc<Node>> = if group.is_compound_shape() {
         // The group's own appearance paints the area ([`evaluate_container`]), so the art has none.
         match compound_shape_area(doc, group, hook) {
@@ -675,7 +689,7 @@ pub fn member_shapes(doc: Option<&Document>, n: &Node) -> Vec<(PathData, FillRul
 }
 
 /// A path node of `id` on `path` (filled under `rule`) painted by `ap`.
-fn shape_node(id: NodeId, path: PathData, rule: FillRule, ap: Appearance) -> Node {
+pub(crate) fn shape_node(id: NodeId, path: PathData, rule: FillRule, ap: Appearance) -> Node {
     let mut n = Node::path(id, path, ap);
     if let NodeKind::Path { rule: r, .. } = &mut n.kind {
         *r = rule;
@@ -708,6 +722,37 @@ fn item_art(id: NodeId, item: &AppearanceItem, shapes: &[(PathData, FillRule)], 
     Some(g)
 }
 
+/// Whether a sublayer among the members of `n`, or among its groups' members, holds a ruler guide.
+fn sublayer_guides(n: &Node) -> bool {
+    n.children().is_some_and(|ch| ch.iter().any(|c| c.holds_ruler_guides() || (!c.is_layer() && sublayer_guides(c))))
+}
+
+/// Move the ruler guides of the sublayers among the members of `n`, and among its groups'
+/// members, to `out`, in order. A guide taken from a hidden or locked sublayer, or from one inside
+/// such a sublayer or group, is hidden or locked itself. Only containers holding one are copied.
+fn take_sublayer_guides(n: &mut Node, out: &mut Vec<Arc<Node>>, hidden: bool, locked: bool) {
+    let Some(ch) = n.children_mut() else { return };
+    for c in ch.iter_mut().filter(|c| c.holds_ruler_guides() || (!c.is_layer() && sublayer_guides(c))) {
+        let c = Arc::make_mut(c);
+        let (hidden, locked) = (hidden || !c.visible, locked || c.locked);
+        if c.is_layer()
+            && let Some(lc) = c.children_mut()
+        {
+            let (taken, art): (Vec<_>, Vec<_>) = std::mem::take(lc).into_iter().partition(|g| g.is_ruler_guide());
+            *lc = art;
+            out.extend(taken.into_iter().map(|mut g| {
+                if hidden || locked {
+                    let g = Arc::make_mut(&mut g);
+                    g.visible &= !hidden;
+                    g.locked |= locked;
+                }
+                g
+            }));
+        }
+        take_sublayer_guides(c, out, hidden, locked);
+    }
+}
+
 /// `n`, a group or layer, as plain art: its Pathfinder effects evaluated, its geometry effects
 /// reshaping all its members as one piece (the whole art's bounds as their reference box), and its
 /// own fills and strokes turned into art painting the members' geometry ([`member_shapes`]) below
@@ -727,9 +772,16 @@ pub fn evaluate_container(doc: Option<&Document>, n: &Node) -> Option<Node> {
         return None;
     }
     let mut m = n.clone();
+    // A layer's ruler guides take no part: they go back above the evaluated art at the end.
+    let mut guides = m.children_mut().map(|ch| ch.split_off(Node::guide_run_start(ch))).unwrap_or_default();
+    // So do its sublayers' guides, which would otherwise go with the art the effects replace or
+    // copy: they stay on this layer, hidden and locked as their sublayers were.
+    if m.is_layer() && (pathfinder || !fx.is_empty()) {
+        take_sublayer_guides(&mut m, &mut guides, false, false);
+    }
     if pathfinder {
         let hook = |c: &Node| crate::outline_object(doc, c);
-        let result = pathfinder_children(doc, n, Some(&hook)).unwrap_or_default();
+        let result = pathfinder_children(doc, &m, Some(&hook)).unwrap_or_default();
         if let Some(ch) = m.children_mut() {
             *ch = result;
         }
@@ -738,14 +790,15 @@ pub fn evaluate_container(doc: Option<&Document>, n: &Node) -> Option<Node> {
     }
     if !fx.is_empty() {
         m = crate::reshape::outlined_members(doc, &m);
-        let carry = crate::reshape::reshape_leaves_carrying(&mut m, &fx, doc);
+        let carry = crate::reshape::reshape_leaves_carrying(&mut m, &fx, &n.appearance.effects, doc);
         // The group's own fills and strokes paint the members as a whole: their gradients follow
         // the effects as the members' do.
         if paint && carry.moves(&m.appearance) {
             carry.apply(&mut m.appearance);
         }
     }
-    m.appearance.effects.retain(|e| !is_pathfinder(&e.id) && !crate::is_geometry(&e.id));
+    m.appearance.effects = crate::raster::without_geometry(&m.appearance.effects);
+    m.appearance.effects.retain(|e| !is_pathfinder(&e.id));
     if paint {
         let shapes = member_shapes(doc, &m);
         let bounds = m.geometric_bounds();
@@ -762,6 +815,9 @@ pub fn evaluate_container(doc: Option<&Document>, n: &Node) -> Option<Node> {
     }
     m.appearance.items.clear();
     m.appearance.contents_index = None;
+    if let Some(ch) = m.children_mut() {
+        ch.extend(guides);
+    }
     Some(m)
 }
 

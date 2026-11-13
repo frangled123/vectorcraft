@@ -382,6 +382,32 @@ fn paste_and_cut_with_the_artboard_tool_make_its_artboard_active() {
     assert_eq!(active(&app), (1, json!(1)), "Cut Artboard 3: Artboard 2");
 }
 
+/// With the Artboard tool selecting several artboards, Paste in Place, in Front and in Back put a
+/// copy of the copied object on each, where it was on the artboard it was copied from; with one
+/// selected, on the active one.
+#[test]
+fn in_place_pastes_put_a_copy_on_each_artboard_the_artboard_tool_selects() {
+    let mut app = VectorcraftApp::new(Session::new(), Default::default());
+    app.run("file.new", json!({"width": 200, "height": 150, "artboards": 3})).unwrap();
+    let boards: Vec<_> = app.session.active().unwrap().doc.artboards.iter().map(|a| a.rect.origin()).collect();
+    let r = app.run("shape.rectangle", json!({"x": boards[0].x + 10.0, "y": boards[0].y + 20.0, "width": 5, "height": 5})).unwrap()["id"].clone();
+    app.run("select.set", json!({"ids": [r]})).unwrap();
+    app.run("edit.copy", json!({})).unwrap();
+    app.select_tool("artboard");
+    let offset = vectorcraft_geom::Vec2::new(10.0, 20.0);
+    let pasted = |app: &mut VectorcraftApp, id: &str| -> Vec<vectorcraft_geom::Point> {
+        let r = app.run(id, json!({})).unwrap();
+        let doc = &app.session.active().unwrap().doc;
+        r["ids"].as_array().unwrap().iter().map(|i| doc.bounds_of(&[vectorcraft_doc::NodeId(i.as_u64().unwrap())], false).unwrap().origin()).collect()
+    };
+    for id in ["edit.pasteInPlace", "edit.pasteInFront", "edit.pasteInBack"] {
+        app.run("tool.setOption", json!({"key": "selected", "value": [2, 0]})).unwrap();
+        assert_eq!(pasted(&mut app, id), [boards[0] + offset, boards[2] + offset], "{id}");
+        app.run("tool.setOption", json!({"key": "selected", "value": [1]})).unwrap();
+        assert_eq!(pasted(&mut app, id), [boards[1] + offset], "{id}: the active artboard");
+    }
+}
+
 /// `tool.setOption` with the Artboard tool's `selected` or `active` makes the artboard the tool
 /// then has active the active one.
 #[test]
@@ -1654,6 +1680,29 @@ fn the_open_menu_reads_what_the_right_click_measured() {
     app.session.execute("artboard.setProps", &json!({"index": 1, "name": "Other"})).unwrap();
     let labels = menu_labels(&crate::menus::context_items(&app));
     assert!(labels.contains(&"Delete Empty Artboards") && !labels.contains(&"Fit to Artwork Bounds"), "{labels:?}");
+}
+
+/// Whether Fit to Artwork Bounds has art to fit is kept for a version of the document, not its
+/// revision: a document replaced with no revision moved (composite fonts synced as its tab comes
+/// to the front) is measured again.
+#[test]
+fn fit_to_art_is_measured_for_each_version_of_the_document() {
+    let mut app = menu_app(2);
+    assert!(!super::fit_has_art(&app, &[0, 1]));
+    // Art on the first artboard, the revision left as it was.
+    let st = app.session.active_mut().unwrap();
+    let mut doc = (*st.doc).clone();
+    let l = doc.layers[0].id;
+    let id = doc.alloc_id();
+    let art = vectorcraft_doc::Node::path(
+        id,
+        vectorcraft_geom::shapes::rectangle(vectorcraft_geom::Rect::new(10.0, 10.0, 20.0, 20.0)),
+        vectorcraft_doc::Appearance::basic(vectorcraft_color::Paint::solid(vectorcraft_color::Color::BLACK), vectorcraft_color::Paint::None, 0.0),
+    );
+    doc.insert(Some(l), 0, art).unwrap();
+    st.doc = std::sync::Arc::new(doc);
+    assert!(super::fit_has_art(&app, &[0, 1]), "measured again");
+    assert!(!super::fit_has_art(&app, &[1]), "measured for the artboards asked about");
 }
 
 /// `artboard.selectAll` chooses the Artboard tool first when another tool is in use, and fails

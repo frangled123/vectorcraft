@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use vectorcraft_doc::{Document, Node, NodeId, NodeKind, Scaling};
+use vectorcraft_doc::{Document, Node, NodeId, NodeKind, Scaling, Selection};
 use vectorcraft_geom::{Anchor, AnchorKind, PathData, Point, SubPath, Vec2};
 
 use super::create::anchor_from_json;
@@ -12,7 +12,7 @@ use super::draw2::usize_opt;
 use super::pathops::Beside;
 use super::{
     CommandSpec, Result, Session, bad, check_numbers, check_switches, cmd, f64_or, f64_req, finite_numbers, has_anchors, has_doc, has_selected_path,
-    has_selection, id_param, ids_param, index, number_or, ok, str_param, switch_or, targets,
+    has_selection, ids_param, index, number_or, object_param, ok, str_param, switch_or, targets,
 };
 use crate::EngineError;
 
@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Close Path",
             [],
             None,
-            "{id, subpath?: usize (the open subpath to close, 0 included; default: the last open one), in?: [x,y] (handle into the first anchor), independent?: bool}",
+            "{id, subpath?: usize (the open subpath to close, 0 included; default: the last open one), in?: [x,y] (handle into the first anchor, placed as path.setHandle places it: a smooth first anchor keeps its outgoing handle in line at its own length, a corner keeps it where it is), out?: [x,y] (the first anchor's outgoing handle, placed after `in`; the anchor becomes a corner), independent?: bool (`in` makes the first anchor a corner and leaves its outgoing handle)}",
             has_doc,
             close
         ),
@@ -131,11 +131,19 @@ pub fn specs() -> Vec<CommandSpec> {
             "Reshape",
             [],
             None,
-            "{id, x, y, dx, dy, tol=3, radius?} Reshape tool: grab the path at (x, y) (adding an anchor there unless one is within tol) and drag it by (dx, dy); nearby anchors follow with a smooth falloff over radius, measured along the path (default: half the subpath's size)",
+            "{id, x, y, dx, dy, tol=3, focal?: [[subpath, anchor]…], radius?} Reshape tool: grab the path at (x, y) (adding an anchor there unless one is within tol) and drag it by (dx, dy). The grabbed anchor and the anchors in focal are focal points and move by the whole drag. Anchors that are not direct-selected stay in place (a path selected whole, or not selected, has every anchor selected), and so do an open path's two ends unless they are focal points. A selected anchor between two focal points moves whole; one between a focal point and an anchor that stays takes a share of the drag that falls smoothly from 1 at the focal point to 0 at the anchor that stays, by its distance along the path's control polygon. A closed subpath with every anchor selected moves whole; a subpath with no focal point does not move. With radius, only the grabbed point's subpath changes: anchors follow with a smooth falloff over radius, measured along the path (0 or more), whatever the selection; focal and radius cannot be used together. Without focal (or with focal null) and without radius, the earlier rule applies: the selection does not matter, an open path stretches from the grabbed point to its two ends, and on a closed path the anchors follow with the falloff over half the diagonal of the subpath's bounding box; the Reshape tool always sends focal",
             has_doc,
             reshape
         ),
-        cmd!("path.insertAnchor", "Add Anchor Point", [], None, "{id, subpath?, segment, t: 0..1}", has_doc, insert_anchor),
+        cmd!(
+            "path.insertAnchor",
+            "Add Anchor Point",
+            [],
+            None,
+            "{id, subpath?, segment, t: 0..1} add an anchor at t on the segment → {anchor}; the direct-selected anchors and selected segments keep the same points (a selected segment it splits stays selected as its two halves), and a path that isn't selected becomes the selection with the new anchor direct-selected",
+            has_doc,
+            insert_anchor
+        ),
         cmd!(
             "path.cutAtAnchors",
             "Cut Path at Selected Anchor Points",
@@ -160,7 +168,7 @@ pub(super) fn path_mut(d: &mut vectorcraft_doc::Document, id: NodeId) -> Result<
 }
 
 fn append_anchor(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = id_param(p, "id").ok_or_else(|| bad("path.appendAnchor", "missing id"))?;
+    let id = object_param(p, "id", "path.appendAnchor")?.ok_or_else(|| bad("path.appendAnchor", "missing id"))?;
     let a = anchor_from_json(p, "path.appendAnchor")?;
     let subpath = p.get("subpath").and_then(Value::as_u64).map(|u| u as usize);
     s.edit("Pen", |d, sel| {
@@ -194,14 +202,18 @@ fn append_anchor(s: &mut Session, p: &Value) -> Result<Value> {
     ok()
 }
 
-/// Close the active open subpath of `id`, optionally setting the incoming handle of the first anchor.
+/// Close the active open subpath of `id`, optionally setting the handles of the first anchor. The
+/// incoming handle moves as Move Direction Handle moves it: the outgoing handle turns with it only
+/// on a smooth anchor, so the first segment of a path that starts at a corner keeps its shape.
 fn close(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = id_param(p, "id").ok_or_else(|| bad("path.close", "missing id"))?;
+    let id = object_param(p, "id", "path.close")?.ok_or_else(|| bad("path.close", "missing id"))?;
     let subpath = p.get("subpath").and_then(Value::as_u64).map(|u| u as usize);
-    let h_in = match p.get("in").filter(|h| !h.is_null()) {
-        None => None,
-        Some(h) => Some(finite_numbers(h).map(|[x, y]| Point::new(x, y)).ok_or_else(|| bad("path.close", "`in` must be [x, y]"))?),
+    let handle = |key: &str| match p.get(key).filter(|h| !h.is_null()) {
+        None => Ok(None),
+        Some(h) => finite_numbers(h).map(|[x, y]| Some(Point::new(x, y))).ok_or_else(|| bad("path.close", format!("`{key}` must be [x, y]"))),
     };
+    let h_in = handle("in")?;
+    let h_out = handle("out")?;
     let independent = switch_or(p, "independent", false, "path.close")?;
     s.edit("Close Path", |d, sel| {
         let path = path_mut(d, id)?;
@@ -210,11 +222,13 @@ fn close(s: &mut Session, p: &Value) -> Result<Value> {
             None => path.subpaths.iter_mut().rev().find(|s| !s.closed).ok_or_else(|| EngineError::Other("path is already closed".into()))?,
         };
         sp.closed = true;
-        if let (Some(h), Some(first)) = (h_in, sp.anchors.first_mut()) {
-            first.h_in = h;
-            if !independent {
-                first.h_out = first.p - (h - first.p);
-                first.kind = AnchorKind::Smooth;
+        if let Some(first) = sp.anchors.first_mut() {
+            if let Some(h) = h_in {
+                first.set_handle(false, h, independent);
+            }
+            if let Some(h) = h_out {
+                first.h_out = h;
+                first.kind = AnchorKind::Corner;
             }
         }
         let top = compound_or_self(d, id);
@@ -281,9 +295,7 @@ pub(crate) fn transform_anchors(s: &mut Session, label: &str, xf: vectorcraft_ge
         }
         if is_translation && (delta.x != 0.0 || delta.y != 0.0) {
             for &i in &sel.guides {
-                if let Some(g) = doc.guides.get_mut(i) {
-                    *g = g.moved(delta);
-                }
+                doc.edit_ruler_guide(i, |g| *g = g.moved(delta));
             }
         }
         Ok(())
@@ -291,7 +303,7 @@ pub(crate) fn transform_anchors(s: &mut Session, label: &str, xf: vectorcraft_ge
 }
 
 fn set_handle(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = id_param(p, "id").ok_or_else(|| bad("path.setHandle", "missing id"))?;
+    let id = object_param(p, "id", "path.setHandle")?.ok_or_else(|| bad("path.setHandle", "missing id"))?;
     let si = usize_opt(p, "subpath", "path.setHandle")?.unwrap_or(0);
     let ai = p.get("anchor").and_then(Value::as_u64).map(index).ok_or_else(|| bad("path.setHandle", "missing anchor"))?;
     let out = str_param(p, "which") != Some("in");
@@ -309,7 +321,7 @@ fn set_handle(s: &mut Session, p: &Value) -> Result<Value> {
 /// `path.moveAnchor`: one anchor to (x, y), its handles keeping their offsets (the Anchor Point
 /// tool's Shift-drag).
 fn move_anchor(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = id_param(p, "id").ok_or_else(|| bad("path.moveAnchor", "missing id"))?;
+    let id = object_param(p, "id", "path.moveAnchor")?.ok_or_else(|| bad("path.moveAnchor", "missing id"))?;
     let si = usize_opt(p, "subpath", "path.moveAnchor")?.unwrap_or(0);
     let ai = p.get("anchor").and_then(Value::as_u64).map(index).ok_or_else(|| bad("path.moveAnchor", "missing anchor"))?;
     let pos = Point::new(f64_req(p, "x", "path.moveAnchor")?, f64_req(p, "y", "path.moveAnchor")?);
@@ -329,7 +341,7 @@ fn move_anchor(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn set_anchors(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = id_param(p, "id").ok_or_else(|| bad("path.setAnchors", "missing id"))?;
+    let id = object_param(p, "id", "path.setAnchors")?.ok_or_else(|| bad("path.setAnchors", "missing id"))?;
     let subs = p.get("subpaths").and_then(Value::as_array).ok_or_else(|| bad("path.setAnchors", "missing subpaths"))?;
     let data = PathData::new(
         subs.iter()
@@ -1224,13 +1236,19 @@ pub(crate) fn delete_anchors(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit("Clear", |d, selection| {
         if with_guides {
             let gone = selection.guides.clone();
-            d.retain_guides(selection, |i, _| !gone.contains(&i));
+            d.retain_guides(selection, |g| !g.id.is_some_and(|id| gone.contains(&id)));
         }
         let targets: BTreeSet<NodeId> = whole.into_iter().filter(|id| d.node(*id).is_some_and(|n| !n.is_layer())).collect();
         let whole_ids: Vec<NodeId> = targets
             .iter()
             .copied()
             .filter(|id| !d.ancestry(*id).unwrap_or_default().iter().rev().skip(1).any(|ancestor| targets.contains(ancestor)))
+            .collect();
+        // The compound paths that hold a deleted object; one left with no members goes too.
+        let compounds: BTreeSet<NodeId> = whole_ids
+            .iter()
+            .chain(sel.keys())
+            .filter_map(|id| d.parent_of(*id).filter(|p| matches!(d.node(*p).map(|n| &n.kind), Some(NodeKind::Compound { .. }))))
             .collect();
         if !whole_ids.is_empty() {
             d.remove_many(&whole_ids)?;
@@ -1280,6 +1298,11 @@ pub(crate) fn delete_anchors(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         emptied.finish(d)?;
+        for p in compounds {
+            if d.node(p).is_some_and(|n| n.children().is_some_and(|c| c.is_empty())) {
+                d.remove(p)?;
+            }
+        }
         selection.set(survivors);
         Ok(())
     })?;
@@ -1329,7 +1352,7 @@ pub(super) fn replace_deleted_pieces(d: &mut Document, beside: &mut Beside, orig
 
 /// Remove anchors and their incident segments, keeping each surviving stretch as an open path.
 /// Only a closed path can have a surviving stretch that wraps past the last anchor.
-fn without_anchors(sp: SubPath, removed: &BTreeSet<usize>) -> Vec<SubPath> {
+pub(super) fn without_anchors(sp: SubPath, removed: &BTreeSet<usize>) -> Vec<SubPath> {
     let n = sp.anchors.len();
     let gone: BTreeSet<usize> = removed.iter().copied().filter(|&i| i < n).collect();
     if gone.is_empty() {
@@ -1399,26 +1422,240 @@ fn open_run(mut anchors: Vec<vectorcraft_geom::Anchor>) -> Option<SubPath> {
     Some(SubPath::new(anchors, false))
 }
 
+/// What an anchor does in a Reshape drag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stretch {
+    /// Not selected: it stays in place.
+    Fixed,
+    /// Selected: it takes a share of the drag that depends on where it lies between the anchors
+    /// that stay and the focal points.
+    Selected,
+    /// A focal point (the grabbed anchor, or one the Reshape tool highlighted): it moves by the
+    /// whole drag.
+    Focal,
+}
+
+/// The share of a Reshape drag that each anchor of a subpath takes, as `[in handle, anchor, out
+/// handle]`, from what each anchor does (`roles`, one per anchor). A focal point takes all of the
+/// drag and an anchor that stays takes none. An open path's end anchors stay unless they are focal
+/// points. A selected anchor between two focal points takes all of the drag, and one between two
+/// anchors that stay takes none. For a selected anchor between an anchor that stays and a focal
+/// point, `u` is its distance from the anchor that stays along the control polygon (anchor, out
+/// handle, the next in handle, the next anchor) divided by the focal point's distance from it, and
+/// its share is `u² (3 - 2u)`. A handle takes the share on the tangent line of that curve at its
+/// anchor, so the two handles of a smooth anchor stay in line with it. That share is below 0 or
+/// above 1 for a handle long enough beside the span. A closed subpath with no anchor that stays
+/// moves whole when it has a focal point.
+fn stretch_weights(anchors: &[Anchor], closed: bool, roles: &[Stretch]) -> Vec<[f64; 3]> {
+    let n = anchors.len();
+    let mut shares = vec![[0.0; 3]; n];
+    let role = |i: usize| match roles.get(i) {
+        Some(Stretch::Selected) if !closed && (i == 0 || i + 1 == n) => Stretch::Fixed,
+        Some(&r) => r,
+        None => Stretch::Fixed,
+    };
+    // The walk along the subpath starts at an anchor that stays, or else at a focal point, and on a
+    // closed subpath it comes back round to the same anchor, so every selected anchor lies between
+    // two anchors that are not selected ones.
+    let start = if closed { (0..n).find(|&i| role(i) == Stretch::Fixed).or_else(|| (0..n).find(|&i| role(i) == Stretch::Focal)) } else { Some(0) };
+    let Some(start) = start.filter(|_| n > 0) else { return shares };
+    let len = if closed { n + 1 } else { n };
+    let order: Vec<usize> = (0..len).map(|k| (start + k) % n).collect();
+    // Where each anchor's in handle, point and out handle lie along the control polygon. The in
+    // handle of the first anchor and the out handle of the last are not part of an open path.
+    let mut pos: Vec<[f64; 3]> = Vec::with_capacity(len);
+    let mut run = 0.0;
+    let mut before: Option<&Anchor> = None;
+    for (k, a) in order.iter().filter_map(|&i| anchors.get(i)).enumerate() {
+        if let Some(b) = before {
+            run += b.h_out.distance(a.h_in);
+        }
+        let c_in = run;
+        if k > 0 {
+            run += a.h_in.distance(a.p);
+        }
+        let c = run;
+        if k + 1 < len {
+            run += a.p.distance(a.h_out);
+        }
+        pos.push([c_in, c, run]);
+        before = Some(a);
+    }
+    // The nearest anchor before and after each place in the walk that is not a selected one.
+    let bound = |k: usize| role(order.get(k).copied().unwrap_or(start)) != Stretch::Selected;
+    let mut previous = vec![0; len];
+    let mut last = 0;
+    for (k, slot) in previous.iter_mut().enumerate() {
+        if bound(k) {
+            last = k;
+        }
+        *slot = last;
+    }
+    let mut next = vec![len - 1; len];
+    let mut first = len - 1;
+    for (k, slot) in next.iter_mut().enumerate().rev() {
+        if bound(k) {
+            first = k;
+        }
+        *slot = first;
+    }
+    let at = |k: usize| pos.get(k).map_or(0.0, |c| c[1]);
+    // The share of the anchor at `k` in the walk, between an anchor that stays at `end` and a
+    // focal point at `focal` along the walk.
+    let smooth = |k: usize, end: f64, focal: f64| {
+        let span = (focal - end).abs();
+        let Some(&[c_in, c, c_out]) = pos.get(k).filter(|_| span > 0.0 && span.is_finite()) else { return [0.0; 3] };
+        let along = |c: f64| (c - end).abs() / span;
+        let u = along(c);
+        let w = u * u * (3.0 - 2.0 * u);
+        let slope = 6.0 * u * (1.0 - u);
+        [w + slope * (along(c_in) - u), w, w + slope * (along(c_out) - u)]
+    };
+    for (k, &i) in order.iter().enumerate().take(n) {
+        let share = match role(i) {
+            Stretch::Fixed => [0.0; 3],
+            Stretch::Focal => [1.0; 3],
+            Stretch::Selected => {
+                let (kp, kn) = (previous.get(k).copied().unwrap_or(k), next.get(k).copied().unwrap_or(k));
+                match (role(order.get(kp).copied().unwrap_or(i)), role(order.get(kn).copied().unwrap_or(i))) {
+                    (Stretch::Focal, Stretch::Focal) => [1.0; 3],
+                    (Stretch::Fixed, Stretch::Focal) => smooth(k, at(kp), at(kn)),
+                    (Stretch::Focal, Stretch::Fixed) => smooth(k, at(kn), at(kp)),
+                    _ => [0.0; 3],
+                }
+            }
+        };
+        // A coordinate that isn't finite moves nothing.
+        if let Some(s) = shares.get_mut(i)
+            && share.iter().all(|s| s.is_finite())
+        {
+            *s = share;
+        }
+    }
+    shares
+}
+
+/// After an anchor is added at `(si, added)` of path `id`, number the direct-selected anchors and
+/// selected segments after it on that subpath one higher, so the selection keeps the same points.
+/// A selected segment that the new anchor splits stays selected as its two halves, and the new
+/// anchor joins its ends in the anchors that move with it.
+fn renumber_after_insert(sel: &mut Selection, id: NodeId, si: usize, added: usize) {
+    if let Some(set) = sel.anchors.get_mut(&id) {
+        // A selected anchor index can name no anchor (`select.anchors` takes any index), so the
+        // renumbering saturates instead of overflowing.
+        *set = set.iter().map(|&(s, a)| if s == si && a >= added { (s, a.saturating_add(1)) } else { (s, a) }).collect();
+    }
+    let split = added.checked_sub(1);
+    if sel.segments.get(&id).is_some_and(|set| split.is_some_and(|g| set.contains(&(si, g)))) {
+        sel.anchors.entry(id).or_default().insert((si, added));
+    }
+    if let Some(set) = sel.segments.get_mut(&id) {
+        *set = set
+            .iter()
+            .flat_map(|&(s, g)| match (s == si, Some(g) == split) {
+                (true, true) => vec![(s, g), (s, g.saturating_add(1))],
+                (true, false) if g >= added => vec![(s, g.saturating_add(1))],
+                _ => vec![(s, g)],
+            })
+            .collect();
+    }
+}
+
 fn reshape(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = id_param(p, "id").ok_or_else(|| bad("path.reshape", "missing id"))?;
+    let id = object_param(p, "id", "path.reshape")?.ok_or_else(|| bad("path.reshape", "missing id"))?;
     let at = Point::new(f64_req(p, "x", "path.reshape")?, f64_req(p, "y", "path.reshape")?);
     check_numbers(p, &["dx", "dy", "tol", "radius"], "path.reshape")?;
     let delta = Vec2::new(f64_or(p, "dx", 0.0), f64_or(p, "dy", 0.0));
     let tol = f64_or(p, "tol", 3.0).max(0.0);
     let radius = p.get("radius").and_then(Value::as_f64);
-    s.edit("Reshape", |d, _| {
+    if radius.is_some_and(|r| r < 0.0) {
+        return Err(bad("path.reshape", "`radius` must be 0 or more"));
+    }
+    // The anchor within `tol` of the grab point, if there is one.
+    let near = |sp: &SubPath| match sp.anchors.iter().enumerate().map(|(i, a)| (i, a.p.distance(at))).min_by(|a, b| a.1.total_cmp(&b.1)) {
+        Some((i, dist)) if dist <= tol => Some(i),
+        _ => None,
+    };
+    // The other focal points the Reshape tool highlighted on this path.
+    let mut focal: BTreeSet<(usize, usize)> = match p.get("focal") {
+        None | Some(Value::Null) => BTreeSet::new(),
+        Some(v) if v.is_array() => super::select::checked_refs(Some(v), "path.reshape")?.into_iter().collect(),
+        Some(_) => return Err(bad("path.reshape", "`focal` must be an array of [subpath, anchor] pairs")),
+    };
+    // An empty `focal` chooses the focal-point rule too.
+    if radius.is_some() && !matches!(p.get("focal"), None | Some(Value::Null)) {
+        return Err(bad("path.reshape", "`focal` and `radius` cannot be used together"));
+    }
+    // A step that names neither `focal` nor `radius` (as the Reshape tool recorded one before it
+    // had focal points) keeps that earlier rule: the selection does not matter, an open path
+    // stretches from the grabbed point to its two ends, and a closed one follows with a falloff
+    // over the default radius.
+    let earlier = radius.is_none() && matches!(p.get("focal"), None | Some(Value::Null));
+    {
+        let st = s.doc()?;
+        let node = st.doc.node(id).ok_or(EngineError::NoNode(id))?;
+        let path = node.path_data().ok_or_else(|| EngineError::Other(format!("object {id} is not a path")))?;
+        if let Some((si, ai)) = focal.iter().copied().find(|&(si, ai)| path.subpaths.get(si).is_none_or(|sp| ai >= sp.anchors.len())) {
+            return Err(bad("path.reshape", format!("`focal` names [{si}, {ai}], which is not an anchor of the path")));
+        }
+        // A drag of no length on an anchor moves nothing, so it is not an edit.
+        if delta == Vec2::ZERO {
+            let (si, ..) = path.nearest(at).ok_or_else(|| EngineError::Other("empty path".into()))?;
+            if path.subpaths.get(si).is_some_and(|sp| near(sp).is_some()) {
+                return ok();
+            }
+        }
+    }
+    s.edit("Reshape", |d, sel| {
         let path = path_mut(d, id)?;
         let (si, seg, t, _, _) = path.nearest(at).ok_or_else(|| EngineError::Other("empty path".into()))?;
-        let sp = &mut path.subpaths[si];
-        let grabbed = match sp.anchors.iter().enumerate().map(|(i, a)| (i, a.p.distance(at))).min_by(|a, b| a.1.total_cmp(&b.1)) {
-            Some((i, dist)) if dist <= tol => i,
-            _ => sp.insert_anchor(seg, t),
+        let sp = path.subpaths.get_mut(si).ok_or_else(|| EngineError::Other("empty path".into()))?;
+        let grabbed = match near(sp) {
+            Some(i) => i,
+            None => {
+                let added = sp.insert_anchor(seg, t);
+                focal = focal.iter().map(|&(s, a)| if s == si && a >= added { (s, a.saturating_add(1)) } else { (s, a) }).collect();
+                renumber_after_insert(sel, id, si, added);
+                // On a partly selected path the new anchor is selected too.
+                if let Some(set) = sel.anchors.get_mut(&id) {
+                    set.insert((si, added));
+                }
+                added
+            }
         };
+        let earlier_closed = earlier && sp.closed;
+        if radius.is_none() && !earlier_closed {
+            focal.insert((si, grabbed));
+            // Anchors that are not direct-selected stay; a path selected whole, or not selected,
+            // has every anchor selected, and so does every path under the earlier rule.
+            let selected = sel.anchors.get(&id).filter(|_| !earlier);
+            for (k, sp) in path.subpaths.iter_mut().enumerate() {
+                if focal.range((k, 0)..=(k, usize::MAX)).next().is_none() {
+                    continue;
+                }
+                let roles: Vec<Stretch> = (0..sp.anchors.len())
+                    .map(|i| match (focal.contains(&(k, i)), selected.is_none_or(|set| set.contains(&(k, i)))) {
+                        (true, _) => Stretch::Focal,
+                        (false, true) => Stretch::Selected,
+                        (false, false) => Stretch::Fixed,
+                    })
+                    .collect();
+                let weights = stretch_weights(&sp.anchors, sp.closed, &roles);
+                for (a, [w_in, w, w_out]) in sp.anchors.iter_mut().zip(weights) {
+                    a.p += delta * w;
+                    a.h_in += delta * w_in;
+                    a.h_out += delta * w_out;
+                }
+            }
+            return Ok(());
+        }
+        let sp = path.subpaths.get_mut(si).ok_or_else(|| EngineError::Other("empty path".into()))?;
+        let closed = sp.closed;
         // Each anchor's distance along the path from the grabbed one, the shorter way round a
         // closed path: the lengths are measured once, as a path can have many anchors.
         let pos = sp.anchor_arc_positions();
         let total = pos.last().copied().unwrap_or(0.0);
-        // The default reach is the subpath's size, as before, now measured along it.
+        // The default reach of the earlier rule: half the diagonal of the subpath's bounding box.
         let r = radius.unwrap_or_else(|| {
             let mut bp = vectorcraft_geom::BezPath::new();
             sp.to_bezpath_into(&mut bp);
@@ -1426,7 +1663,6 @@ fn reshape(s: &mut Session, p: &Value) -> Result<Value> {
             (b.width().hypot(b.height()) / 2.0).max(1.0)
         });
         let from = pos.get(grabbed).copied().unwrap_or(0.0);
-        let closed = sp.closed;
         for (i, a) in sp.anchors.iter_mut().enumerate() {
             let w = if i == grabbed {
                 1.0
@@ -1448,7 +1684,7 @@ fn reshape(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn insert_anchor(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = id_param(p, "id").ok_or_else(|| bad("path.insertAnchor", "missing id"))?;
+    let id = object_param(p, "id", "path.insertAnchor")?.ok_or_else(|| bad("path.insertAnchor", "missing id"))?;
     let si = usize_opt(p, "subpath", "path.insertAnchor")?.unwrap_or(0);
     let seg = p.get("segment").and_then(Value::as_u64).map(index).ok_or_else(|| bad("path.insertAnchor", "missing segment"))?;
     let t = number_or(p, "t", 0.5, "path.insertAnchor")?.clamp(0.0, 1.0);
@@ -1459,6 +1695,7 @@ fn insert_anchor(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(EngineError::Other("no such segment".into()));
         }
         let idx = sp.insert_anchor(seg, t);
+        renumber_after_insert(sel, id, si, idx);
         // A path that wasn't selected becomes the selection, its new anchor direct-selected, so
         // the point added shows and can be edited at once (#4237).
         if !sel.contains(id) {

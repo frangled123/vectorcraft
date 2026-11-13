@@ -9,7 +9,9 @@ use crate::theme::Brightness;
 /// Per-document view (camera).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct View {
-    /// Screen points per document point (1.0 = 100%).
+    /// The zoom (1.0 = 100%): points of the screen per document point, counted before
+    /// Preferences › User Interface › UI Scaling, which scales the interface and not the art.
+    /// [`Self::screen_zoom`] is the zoom in the interface's points.
     pub zoom: f64,
     /// Document point at the centre of the canvas.
     pub center: Point,
@@ -54,6 +56,19 @@ impl View {
             artboard: 0,
             outline: false,
         })
+    }
+
+    /// The interface's points per document point when the interface is zoomed by `ui_zoom` (egui's
+    /// zoom factor, which Preferences › User Interface › UI Scaling sets). A document point then
+    /// covers the same device pixels at every UI Scaling.
+    pub fn screen_zoom(&self, ui_zoom: f32) -> f64 {
+        self.zoom / f64::from(ui_zoom)
+    }
+
+    /// This view with its zoom in the interface's points ([`Self::screen_zoom`]), as the canvas
+    /// renders it.
+    pub(crate) fn on_screen(&self, ui_zoom: f32) -> Self {
+        Self { zoom: self.screen_zoom(ui_zoom), ..*self }
     }
 }
 
@@ -208,6 +223,8 @@ pub const ICON_PANELS: &[(&str, &str, &str)] = &[
     (crate::panels::css_properties::ID, "CSS Properties", "globe"),
     (crate::panels::three_d::ID, "3D and Materials", "dc-cube"),
     (crate::panels::variables::ID, "Variables", "chart-column"),
+    (crate::panels::script_console::ID, "Script Console", "message-circle"),
+    (crate::panels::learn::ID, "Learn", "graduation-cap"),
     (crate::addons::cleanup::ID, "Artwork Cleanup", "sparkles"),
     (crate::addons::color::ID, "Color Effects", "sun"),
     (crate::addons::pathtools::ID, "Anchor Inspector", "dc-anchor-smooth"),
@@ -267,6 +284,10 @@ pub struct ViewFlags {
     pub live_paint_gaps: bool,
     /// Type → Show Hidden Characters.
     pub hidden_chars: bool,
+    /// Edit › Spelling › Auto Spell Check: a red underline under the words of the type its
+    /// dictionaries don't know.
+    #[serde(default)]
+    pub auto_spell_check: bool,
     /// View → Hide/Show Template: template layers drawn (dimmed) or left out of the canvas.
     #[serde(default = "yes")]
     pub templates: bool,
@@ -294,6 +315,7 @@ impl Default for ViewFlags {
             gradient_annotator: true,
             live_paint_gaps: false,
             hidden_chars: false,
+            auto_spell_check: false,
             templates: true,
         }
     }
@@ -343,6 +365,21 @@ pub struct ReplaceFontWarning {
     pub styles: Vec<(String, String)>,
 }
 
+/// A misspelled word right-clicked on the canvas ([`UiState::context_spelling`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContextSpelling {
+    /// The document's `uid`.
+    pub uid: u64,
+    /// The type object.
+    pub id: vectorcraft_doc::NodeId,
+    /// The word's bytes in the object's plain text, which `text.editRange` replaces.
+    pub start: usize,
+    pub end: usize,
+    pub word: String,
+    /// What the dictionary of the word's language suggests instead, best first.
+    pub suggestions: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiState {
@@ -372,13 +409,29 @@ pub struct UiState {
     /// That popup's first text field is still to take the keyboard.
     #[serde(skip)]
     pub transient_focus: bool,
+    /// The Separations Preview panel is still to scroll its Color Settings section into view:
+    /// Edit › Color Settings… and Assign Profile… show the panel for it, and the section sits below
+    /// the plates and Proof Setup, out of sight in a short window (#6419).
+    #[serde(skip)]
+    pub color_settings_scroll: bool,
     /// Type › Find Font…'s last Find In choice (`find_font::FIND_IN`), kept while the app runs.
     #[serde(skip)]
     pub find_font_in: String,
+    /// The Learn panel's tab, skill and tutorial, kept while the app runs.
+    #[serde(skip)]
+    pub learn: crate::panels::learn::View,
+    /// The tool whose place a Learn tutorial step's link shows (`learn.locateTool`), while its mark
+    /// is on screen. Not saved.
+    #[serde(skip)]
+    pub learn_locate: Option<crate::panels::learn::locate::Locate>,
     pub control_bar: bool,
     /// The Control bar is docked to the bottom of the window instead of the top
     /// (`window.control.dock`).
     pub control_bar_bottom: bool,
+    /// The groups of the Control bar's options (`chrome::CONTROL_BAR_GROUPS`) that its panel menu
+    /// has off (`window.control.options`); none: every group shows.
+    #[serde(deserialize_with = "crate::chrome::read_hidden_groups")]
+    pub control_bar_hidden_groups: std::collections::BTreeSet<String>,
     pub toolbar: bool,
     pub toolbar_double: bool,
     /// Advanced toolbar (every tool group) instead of the categorized Basic toolbar.
@@ -410,6 +463,10 @@ pub struct UiState {
     /// while it is open ([`crate::panels::artboards::MenuFacts`]). Not saved.
     #[serde(skip)]
     pub context_artboards: Option<crate::panels::artboards::MenuFacts>,
+    /// The word with Auto Spell Check's red line under the last right-click on the canvas, for the
+    /// context menu's suggestions, Ignore All and Add to Dictionary while it is open. Not saved.
+    #[serde(skip)]
+    pub context_spelling: Option<ContextSpelling>,
     /// Which link statuses the active document's images and placed documents have, for Select ›
     /// Linked, Embedded, Missing and Modified to be on only when some do (refreshed by
     /// [`crate::addons::select::link_status::refresh`]). Not saved.
@@ -503,6 +560,11 @@ pub struct UiState {
     /// The Replace Font request behind the status bar's warning ([`ReplaceFontWarning`]). Not saved.
     #[serde(skip)]
     pub replace_font_warning: Option<ReplaceFontWarning>,
+    /// The notes of the last open that gave any, or of the last save or export, with the status
+    /// text that names the first of them: hovering that text lists them when there are several.
+    /// Not saved.
+    #[serde(skip)]
+    pub status_notes: Option<(String, Vec<String>)>,
     pub palette_open: bool,
     pub palette_query: String,
     /// Screen mode: 0 normal, 1 full screen with menu, 2 full screen, 3 presentation. Not saved:
@@ -547,6 +609,16 @@ pub struct UiState {
     /// adds a new action, as after Begin Recording.
     #[serde(skip)]
     pub recording_into: Option<u64>,
+    /// The length of the action set file that Stop Playing/Recording would leave without the steps
+    /// recorded so far, once measured; None until then, and again after an app command, which may
+    /// change the sets.
+    #[serde(skip)]
+    pub recording_base: Option<usize>,
+    /// The bytes that the steps recorded so far add to that file, at most, as last counted: (the
+    /// journal's rewrites, the recording's first entry, the journal's length, the bytes)
+    /// ([`vectorcraft_engine::Journal::rewrites`]).
+    #[serde(skip)]
+    pub recording_tail: Option<(u64, usize, usize, usize)>,
     /// How actions play (Actions panel menu › Playback Options…), kept with the UI preferences.
     #[serde(default, deserialize_with = "crate::panels::actions::deserialize_playback")]
     pub action_playback: crate::panels::actions::PlaybackOptions,
@@ -622,6 +694,19 @@ pub struct UiState {
     /// [`crate::panels::color::deserialize_hide_options`]).
     #[serde(default, deserialize_with = "crate::panels::color::deserialize_hide_options")]
     pub color_hide_options: bool,
+    /// Color panel: Show Recent Colors, which draws its Recent Colors row while the options show
+    /// (`ui.colorPanel`, [`crate::panels::color::deserialize_show_recent_colors`]). The list of
+    /// recent colors keeps filling while the row is hidden.
+    #[serde(default = "yes", deserialize_with = "crate::panels::color::deserialize_show_recent_colors")]
+    pub color_show_recent_colors: bool,
+    /// Color panel: RGB mode shows R, G and B in percent instead of 0 to 255 (a double-click right
+    /// of an RGB field, `ui.colorPanel`, [`crate::panels::color::deserialize_rgb_percent`]).
+    #[serde(default, deserialize_with = "crate::panels::color::deserialize_rgb_percent")]
+    pub color_rgb_percent: bool,
+    /// Swatches panel: Show Recent Colors in its panel menu, which draws the panel's Recent Colors
+    /// row (#6617; read as [`Self::color_show_recent_colors`] is). Separate from the Color panel's.
+    #[serde(default = "yes", deserialize_with = "crate::panels::color::deserialize_show_recent_colors")]
+    pub swatches_show_recent_colors: bool,
     /// The SVG Options chosen last (`svg` object of the export/save commands; null: never used).
     #[serde(default)]
     pub svg_options: Value,
@@ -985,9 +1070,13 @@ impl Default for UiState {
             open_panel: None,
             transient_panel: None,
             transient_focus: false,
+            color_settings_scroll: false,
             find_font_in: String::new(),
+            learn: Default::default(),
+            learn_locate: None,
             control_bar: false,
             control_bar_bottom: false,
+            control_bar_hidden_groups: Default::default(),
             toolbar: true,
             toolbar_double: false,
             toolbar_advanced: false,
@@ -997,6 +1086,7 @@ impl Default for UiState {
             context_locked: None,
             context_intertwine: None,
             context_artboards: None,
+            context_spelling: None,
             link_statuses: Default::default(),
             slot_tool: Default::default(),
             floating_flyouts: vec![],
@@ -1028,6 +1118,7 @@ impl Default for UiState {
             group_tool: vectorcraft_tools::TOOL_GROUPS.iter().map(|g| g[0].id.to_string()).collect(),
             status: String::new(),
             replace_font_warning: None,
+            status_notes: None,
             palette_open: false,
             palette_query: String::new(),
             screen_mode: 0,
@@ -1041,6 +1132,8 @@ impl Default for UiState {
             action_sets_selected: vec![],
             recording: None,
             recording_into: None,
+            recording_base: None,
+            recording_tail: None,
             action_playback: Default::default(),
             action_playing: None,
             shortcut_overrides: Default::default(),
@@ -1062,6 +1155,9 @@ impl Default for UiState {
             align_spacing: 0.0,
             color_mode: None,
             color_hide_options: false,
+            color_show_recent_colors: true,
+            color_rgb_percent: false,
+            swatches_show_recent_colors: true,
             svg_options: Value::Null,
             place_link: true,
             dialog_file: None,

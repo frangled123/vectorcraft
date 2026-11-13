@@ -19,8 +19,8 @@ use vectorcraft_doc::{Document, ImageBlob, Node, NodeId, NodeKind};
 
 use super::edit::selected_roots;
 use super::{
-    CommandSpec, EngineError, Result, Session, always, bad, bool_or, check_numbers, cmd, color_value, f64_or, f64_req, has_selection, ids_param,
-    str_param, unique_name,
+    CommandSpec, EngineError, Result, Session, always, bad, check_numbers, cmd, color_value, f64_or, f64_req, has_selection, ids_param, switch_or,
+    text_param, unique_name,
 };
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -48,9 +48,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "Convert to Grayscale",
             ["Edit", "Edit Colors"],
             None,
-            "{fill?, stroke?, includeImages?, includePatterns?, ids?} (as edit.colors.invert) → {changed, notChanged, warning?}",
+            "{fill?, stroke?, includeImages?, includePatterns?, ids?} (as edit.colors.invert; an embedded image is stored with one gray channel) → {changed, notChanged, warning?}",
             has_selection,
-            |s, p| recolor(s, p, "edit.colors.toGrayscale", "Convert to Grayscale", &to_gray)
+            |s, p| recolor_gray(s, p, "edit.colors.toGrayscale", "Convert to Grayscale", &to_gray)
         ),
         cmd!(
             "edit.colors.toRGB",
@@ -166,13 +166,15 @@ pub(crate) struct Scope {
 }
 
 impl Scope {
-    pub(crate) fn of(p: &Value) -> Self {
-        Self {
-            fill: bool_or(p, "fill", true),
-            stroke: bool_or(p, "stroke", true),
-            images: bool_or(p, "includeImages", true),
-            patterns: bool_or(p, "includePatterns", true),
-        }
+    /// The scope `p` gives; each switch left out (or null) is on. A switch that is not true or false,
+    /// such as `"false"`, is an error that names `cmd`.
+    pub(crate) fn of(p: &Value, cmd: &str) -> Result<Self> {
+        Ok(Self {
+            fill: switch_or(p, "fill", true, cmd)?,
+            stroke: switch_or(p, "stroke", true, cmd)?,
+            images: switch_or(p, "includeImages", true, cmd)?,
+            patterns: switch_or(p, "includePatterns", true, cmd)?,
+        })
     }
 }
 
@@ -187,6 +189,8 @@ pub(crate) struct Recolor<'a> {
     /// Maps solid colours and gradient stops with their link and tint in place of `f`.
     links: Option<&'a LinkMap<'a>>,
     scope: Scope,
+    /// Recolored images are stored with one gray channel ([`ImageBlob::map_gray`]).
+    gray_images: bool,
     /// Image key → the key of its recoloured copy (`None`: unchanged).
     images: HashMap<String, Option<String>>,
     /// Pattern name → the name of its recoloured copy (`None`: unchanged, or being recoloured).
@@ -198,7 +202,17 @@ pub(crate) struct Recolor<'a> {
 
 impl<'a> Recolor<'a> {
     pub(crate) fn new(scope: Scope, f: &'a dyn Fn(Color) -> Color) -> Self {
-        Self { f, links: None, scope, images: HashMap::new(), patterns: HashMap::new(), new_images: vec![], new_patterns: vec![], changed: 0 }
+        Self {
+            f,
+            links: None,
+            scope,
+            gray_images: false,
+            images: HashMap::new(),
+            patterns: HashMap::new(),
+            new_images: vec![],
+            new_patterns: vec![],
+            changed: 0,
+        }
     }
 
     /// A pass that maps only solid colours and gradient stops, with their swatch link and tint
@@ -215,7 +229,7 @@ impl<'a> Recolor<'a> {
 
     /// A pass that maps colors as this one does, with nothing recolored yet.
     fn again(&self) -> Self {
-        Self { links: self.links, ..Self::new(self.scope, self.f) }
+        Self { links: self.links, gray_images: self.gray_images, ..Self::new(self.scope, self.f) }
     }
 
     /// The entries of `objects` (ids, each with a flag) whose object this pass would change, other
@@ -313,10 +327,15 @@ impl<'a> Recolor<'a> {
             return done.clone();
         }
         let f = self.f;
-        let new = d.images.get(key)?.map_rgb(|[r, g, b]| {
-            let [r, g, b, _] = f(Color::rgb8(r, g, b)).to_rgba8(1.0);
-            [r, g, b]
-        });
+        let blob = d.images.get(key)?;
+        let new = if self.gray_images {
+            blob.map_gray(|[r, g, b]| f(Color::rgb8(r, g, b)).to_rgba8(1.0)[0])
+        } else {
+            blob.map_rgb(|[r, g, b]| {
+                let [r, g, b, _] = f(Color::rgb8(r, g, b)).to_rgba8(1.0);
+                [r, g, b]
+            })
+        };
         let new = new.map(|blob| {
             let k = blob.content_key();
             self.new_images.push((k.clone(), blob));
@@ -397,13 +416,18 @@ impl ColorVisitor for Visit<'_, '_> {
 }
 
 pub(crate) fn recolor(s: &mut Session, p: &Value, cmd: &str, label: &str, f: &dyn Fn(Color) -> Color) -> Result<Value> {
-    run_pass(s, p, cmd, label, Recolor::new(Scope::of(p), f))
+    run_pass(s, p, cmd, label, Recolor::new(Scope::of(p, cmd)?, f))
+}
+
+/// [`recolor`] where `f` gives gray colors, so embedded images are stored with one gray channel.
+fn recolor_gray(s: &mut Session, p: &Value, cmd: &str, label: &str, f: &dyn Fn(Color) -> Color) -> Result<Value> {
+    run_pass(s, p, cmd, label, Recolor { gray_images: true, ..Recolor::new(Scope::of(p, cmd)?, f) })
 }
 
 /// [`recolor`] with solid colours and gradient stops mapped through `links`, with their swatch
 /// link and tint.
 pub(crate) fn recolor_links(s: &mut Session, p: &Value, cmd: &str, label: &str, f: &dyn Fn(Color) -> Color, links: &LinkMap) -> Result<Value> {
-    run_pass(s, p, cmd, label, Recolor::with_links(Scope::of(p), f, links))
+    run_pass(s, p, cmd, label, Recolor::with_links(Scope::of(p, cmd)?, f, links))
 }
 
 /// Run `pass` on the `ids` param's objects (default: the selection) as one undo step named `label`;
@@ -440,7 +464,7 @@ fn run_pass(s: &mut Session, p: &Value, cmd: &str, label: &str, pass: Recolor) -
 pub(crate) fn left_out(d: &Document, iso: Option<NodeId>, roots: &[NodeId]) -> Vec<(NodeId, bool)> {
     fn visit(n: &Node, hidden: bool, locked: bool, all: &HashSet<NodeId>, board_locked: &dyn Fn(&Node) -> bool, out: &mut Vec<(NodeId, bool)>) {
         for c in n.children().into_iter().flatten() {
-            if c.is_template() {
+            if c.is_template() || c.is_ruler_guide() {
                 continue;
             }
             let (hidden, locked) = (hidden || !c.visible, locked || c.locked);
@@ -526,8 +550,9 @@ fn saturate(s: &mut Session, p: &Value) -> Result<Value> {
 fn adjust_balance(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "edit.colors.adjustBalance";
     check_numbers(p, &["r", "g", "b", "c", "m", "y", "k", "gray", "tint"], C)?;
+    let convert = switch_or(p, "convert", false, C)?;
     let given = |keys: &[&str]| keys.iter().any(|k| p.get(*k).is_some());
-    let mode = match str_param(p, "mode") {
+    let mode = match text_param(p, "mode", C)? {
         Some(m) => m.to_ascii_lowercase(),
         None if given(&["c", "m", "y", "k"]) => "cmyk".into(),
         None if given(&["gray"]) => "gray".into(),
@@ -570,15 +595,15 @@ fn adjust_balance(s: &mut Session, p: &Value) -> Result<Value> {
                 (*tint, *c) = (t, base.tinted(t));
                 true
             };
-            return run_pass(s, p, C, "Adjust Colors", Recolor::links(Scope::of(p), &shift));
+            return run_pass(s, p, C, "Adjust Colors", Recolor::links(Scope::of(p, C)?, &shift));
         }
         other => return Err(bad(C, format!("unknown mode `{other}` (rgb|cmyk|gray|global)"))),
     };
-    let convert = bool_or(p, "convert", false);
-    recolor(s, p, C, "Adjust Colors", &move |c| {
+    let f = move |c| {
         let out = adjust(c);
         if convert { out } else { keep_model(c, out) }
-    })
+    };
+    if convert && mode == "gray" { recolor_gray(s, p, C, "Adjust Colors", &f) } else { recolor(s, p, C, "Adjust Colors", &f) }
 }
 
 enum BlendOrder {
@@ -680,7 +705,7 @@ fn blend(s: &mut Session, order: BlendOrder) -> Result<Value> {
 fn harmony(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "color.harmony";
     let base = p.get("color").and_then(color_value).ok_or_else(|| bad(C, "missing or invalid `color`"))?;
-    let rule = str_param(p, "rule").ok_or_else(|| bad(C, "missing `rule`"))?;
+    let rule = text_param(p, "rule", C)?.ok_or_else(|| bad(C, "missing `rule`"))?;
     let rule = Harmony::parse(rule).ok_or_else(|| {
         let ids: Vec<String> = Harmony::ALL.iter().map(|h| h.id()).collect();
         bad(C, format!("unknown rule `{rule}` ({})", ids.join("|")))
@@ -690,7 +715,7 @@ fn harmony(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(n) = p.get("steps").and_then(Value::as_u64) {
         opts.steps = n.min(u32::MAX as u64) as u32;
     }
-    if let Some(v) = str_param(p, "variation") {
+    if let Some(v) = text_param(p, "variation", C)? {
         opts.variation = Variation::parse(v).ok_or_else(|| bad(C, format!("unknown variation `{v}` (tintsShades|warmCool|vividMuted)")))?;
     }
     if let Some(a) = p.get("amount").and_then(Value::as_f64) {

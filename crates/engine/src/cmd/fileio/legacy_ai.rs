@@ -136,20 +136,23 @@ pub(super) fn encode(cmd: &str, f: &Format, doc: &Document, p: &Value) -> Result
         }
         let images = see_through_images(&d, mode);
         if !images.is_empty() {
-            note(&mut enc.warnings, if mode == SeeThrough::Flatten { FLATTENED } else { OMITTED });
             if mode == SeeThrough::Flatten {
+                note(&mut enc.warnings, FLATTENED);
                 flatten_images(&mut d, &images)?;
             } else {
+                // A note on the options: `transparentImages: omit` leaves them out.
+                enc.add_setting_notes([OMITTED.to_string()]);
                 for (_, id) in images {
                     let _ = d.remove(id); // Inside an image left out before: gone already.
                 }
             }
         }
-        let o = vectorcraft_eps::LegacyAiOptions { title: doc.title.clone(), created, hidden, outline_text };
+        let o = vectorcraft_eps::LegacyAiOptions { title: doc.info_title().to_owned(), created, hidden, outline_text };
         let out = vectorcraft_eps::export_legacy_ai(&d, &o).map_err(|e| bad(cmd, e))?;
         for w in placed.iter().chain(&out.warnings) {
             note(&mut enc.warnings, w);
         }
+        enc.add_setting_notes(out.setting_notes);
         enc.files.push((Some(b), out.bytes));
     }
     // Expanding raster effects and flattening images draw the art, and an image the renderer
@@ -270,7 +273,9 @@ fn flattened(src: &Document, at: usize, id: NodeId) -> Result<Option<Flat>> {
     let pt = im.xf.determinant().abs().sqrt();
     let ppi = if pt.is_finite() && pt > 0.0 { (72.0 / pt).clamp(MIN_PPI, MAX_PPI) } else { MIN_PPI };
     let area = (bounds.width() * bounds.height()).max(1.0);
-    let scale = (ppi / 72.0).min((super::super::menucmds::MAX_PIXELS / area).sqrt());
+    // No side longer than the renderer draws (rounded up to whole pixels below).
+    let longest = (f64::from(vectorcraft_render::MAX_RASTER_SIDE) - 2.0) / bounds.width().max(bounds.height()).max(1.0);
+    let scale = (ppi / 72.0).min((super::super::menucmds::MAX_PIXELS / area).sqrt()).min(longest);
     if !(scale.is_finite() && scale > 0.0) {
         return Ok(None);
     }

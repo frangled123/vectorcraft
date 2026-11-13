@@ -133,6 +133,8 @@ Generated-in-code art is original and has no file to list. This covers the defau
 | `assets/icons/dc-free-transform.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
 | `assets/icons/dc-fx.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
 | `assets/icons/dc-gamut.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
+| `assets/icons/dc-grad-conic.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
+| `assets/icons/dc-grad-diamond.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
 | `assets/icons/dc-grad-freeform.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
 | `assets/icons/dc-grad-linear.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
 | `assets/icons/dc-grad-radial.svg` | VectorCraft contributors | Original work, drawn for VectorCraft | MIT OR Apache-2.0 |  |
@@ -239,6 +241,7 @@ Generated-in-code art is original and has no file to list. This covers the defau
 | `assets/icons/flip-vertical-2.svg` | Lucide Icons and Contributors | https://lucide.dev (lucide-static v1.49.0; header kept in file) | ISC (`assets/icons/LICENSE-lucide.txt`) |  |
 | `assets/icons/folder-open.svg` | Lucide Icons and Contributors | https://lucide.dev (lucide-static v1.49.0; header kept in file) | ISC (`assets/icons/LICENSE-lucide.txt`) |  |
 | `assets/icons/frame.svg` | Lucide Icons and Contributors | https://lucide.dev (lucide-static v1.49.0; header kept in file) | ISC (`assets/icons/LICENSE-lucide.txt`) |  |
+| `assets/icons/graduation-cap.svg` | Lucide Icons and Contributors | https://lucide.dev (lucide-static v1.49.0; header kept in file) | ISC (`assets/icons/LICENSE-lucide.txt`) | Learn panel, Explore tutorials button |
 | `assets/icons/grid-3x3.svg` | Lucide Icons and Contributors | https://lucide.dev (lucide-static v1.49.0; header kept in file) | ISC (`assets/icons/LICENSE-lucide.txt`) |  |
 | `assets/icons/group.svg` | Lucide Icons and Contributors | https://lucide.dev (lucide-static v1.49.0; header kept in file) | ISC (`assets/icons/LICENSE-lucide.txt`) |  |
 | `assets/icons/hand.svg` | Lucide Icons and Contributors | https://lucide.dev (lucide-static v1.49.0; header kept in file) | ISC (`assets/icons/LICENSE-lucide.txt`) |  |
@@ -415,3 +418,7 @@ The shared PDF backend keeps the existing standard-font and CMap features. These
 | `assets/app-icon/vectorcraft-dark-128.png` | frangled123 | Original ribbon v3 dark palette, rendered by `packaging/icons.sh` | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) | In-app dark-theme icon |
 
 The DMG background retains the upstream layout and outlined labels. Its replacement ribbon artwork and accent adaptation are by frangled123, MIT OR Apache-2.0.
+
+Chinese catalog additions in `crates/ui-egui/src/i18n/zh-hans.tsv` and `zh-hant.tsv`: original translations by independent fork contributors, MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`); existing translation credits remain unchanged.
+
+本次独立分支补充的简繁中文词条位于 `crates/ui-egui/src/i18n/zh-hans.tsv` 和 `zh-hant.tsv`，依据仓库内英文源消息撰写，采用 MIT OR Apache-2.0；保留既有译者及词条归属。

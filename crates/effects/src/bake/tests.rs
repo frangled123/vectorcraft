@@ -575,6 +575,27 @@ fn a_baked_stroke_with_a_gradient_along_it_becomes_meshes_clipped_to_its_outline
     assert_eq!(ch[1].opacity, 0.5);
 }
 
+/// Distort Appearance on the pieces of type's glyph outlines (#6644): a stroke's geometry effect
+/// still bakes into its piece, but the stroke stays a stroke at its own weight; a piece with no
+/// geometry effect is left as it is, its stroke on it (Distort Appearance on a path outlines it).
+#[test]
+fn type_pieces_bake_their_geometry_effects_and_keep_their_strokes() {
+    let mut n = Node::path(NodeId(50), shapes::rectangle(Rect::new(0.0, 0.0, 100.0, 100.0)), Appearance::default_art());
+    assert!(bake_type_appearance(None, &n).is_none(), "nothing to bake");
+    assert!(bake_appearance(None, &n).is_some(), "a path's stroke is outlined");
+    if let AppearanceItem::Stroke(s) = &mut n.appearance.items[1] {
+        s.width = 4.0;
+        s.effects.push(fx("path.offsetPath", json!({"offset": 5.0})));
+    }
+    let m = bake_type_appearance(None, &n).unwrap();
+    let ch = m.children().unwrap();
+    assert_eq!(ch.len(), 2);
+    let Some(AppearanceItem::Stroke(st)) = ch[1].appearance.items.first() else { panic!("still a stroke: {:?}", ch[1].appearance) };
+    assert!(st.width == 4.0 && st.effects.is_empty(), "{st:?}");
+    assert!((ch[1].geometric_bounds().unwrap().width() - 110.0).abs() < 0.5, "the stroke's offset is baked into its path");
+    assert!((ch[0].geometric_bounds().unwrap().width() - 100.0).abs() < 1e-6, "the fill keeps the square");
+}
+
 /// A 100 pt square at the origin painted by `fill` and `stroke` (`width` pt), with the Transform
 /// effect `params`.
 fn transformed(fill: Paint, stroke: Paint, width: f64, params: serde_json::Value) -> Node {
@@ -603,7 +624,7 @@ fn a_baked_transform_copy_keeps_its_scaled_stroke() {
     let m = bake_appearance(None, &n).unwrap();
     let w = widths(&m);
     assert_eq!(w.len(), 2, "{w:?}");
-    assert!((w[0] - 102.0).abs() < 0.5 && (w[1] - 204.0).abs() < 0.5, "{w:?}");
+    assert!((w[1] - 102.0).abs() < 0.5 && (w[0] - 204.0).abs() < 0.5, "the original on top: {w:?}");
     assert!(baked_paths(&m).iter().all(|p| p.appearance.stroke().is_none()), "the strokes are outlined");
 }
 
@@ -619,7 +640,7 @@ fn a_baked_transform_copy_keeps_its_moved_pattern() {
             p => panic!("not a pattern: {p:?}"),
         })
         .collect();
-    assert_eq!(xs, vec![0.0, 30.0]);
+    assert_eq!(xs, vec![30.0, 0.0], "the original on top");
 }
 
 #[test]

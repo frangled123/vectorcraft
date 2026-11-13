@@ -60,9 +60,11 @@ const NAME_FIELD_ROOM: f32 = 330.0;
 /// names in tooltips, when the bar is short of room) and, while the bar has room, the reference
 /// point the Transform panel also uses with the artboard's X and Y, and its W and H with the
 /// Constrain Width and Height Proportions link. Each control runs the command its Properties panel
-/// or Transform panel counterpart runs. Returns false, and draws nothing, while another tool is in
-/// use.
-pub(crate) fn control_bar(app: &mut VectorcraftApp, ui: &mut Ui) -> bool {
+/// or Transform panel counterpart runs. With `options` false (the bar's panel menu has its Artboard
+/// Options group off), the controls other than the Transform link and the fields are left out; with
+/// `transform` false (its Transform group off), the Transform link and the fields are. Returns
+/// false, and draws nothing, while another tool is in use.
+pub(crate) fn control_bar(app: &mut VectorcraftApp, ui: &mut Ui, options: bool, transform: bool) -> bool {
     if app.session.tool_id() != "artboard" {
         return false;
     }
@@ -71,35 +73,43 @@ pub(crate) fn control_bar(app: &mut VectorcraftApp, ui: &mut Ui) -> bool {
     let i = selected(app, n);
     let Some(ab) = app.session.active().and_then(|d| d.doc.artboards.get(i)).cloned() else { return true };
     let r = ab.rect;
-    super::properties::artboard_size_row(app, ui, i, r.width(), r.height());
-    if widgets::icon_button(ui, "dc-new-item", tl!("New Artboard"), false, 24.0).clicked() {
-        add_new(app);
+    if options {
+        super::properties::artboard_size_row(app, ui, i, r.width(), r.height());
+        if widgets::icon_button(ui, "dc-new-item", tl!("New Artboard"), false, 24.0).clicked() {
+            add_new(app);
+        }
+        if widgets::icon_button_enabled(ui, "trash-2", tl!("Delete Artboard"), false, n > 1, 24.0).clicked() {
+            delete_selected(app);
+        }
+        ui.separator();
+        // The field shows the name as it is (names are never translated). A new name is applied on Enter
+        // or a click elsewhere, and an empty field or Escape keeps the old one, as in the Properties panel.
+        ui.label(egui::RichText::new(tl!("Name:")).size(12.0).color(t.text));
+        let width = if ui.available_width() < NAME_FIELD_ROOM { 100.0 } else { 120.0 };
+        if let Some(name) = widgets::text_field_named(ui, ("cb-ab", "name"), Some(tl!("Name:")), Some(&ab.name), width, 1).filter(|n| !n.is_empty()) {
+            app.run("artboard.setProps", json!({"index": i, "name": name})).ok();
+        }
+        if widgets::icon_button(ui, "dc-artboard-options", tl!("Artboard Options"), false, 24.0).clicked() {
+            app.run("tool.options", json!({"tool": "artboard"})).ok();
+        }
+        if widgets::icon_button_enabled(ui, "dc-rearrange", tl!("Rearrange All Artboards"), false, n > 1, 24.0).clicked() {
+            open_rearrange(app);
+        }
+        ui.separator();
     }
-    if widgets::icon_button_enabled(ui, "trash-2", tl!("Delete Artboard"), false, n > 1, 24.0).clicked() {
-        delete_selected(app);
+    if transform {
+        super::transform::link(app, ui);
+        ui.separator();
     }
-    ui.separator();
-    // The field shows the name as it is (names are never translated). A new name is applied on Enter
-    // or a click elsewhere, and an empty field or Escape keeps the old one, as in the Properties panel.
-    ui.label(egui::RichText::new(tl!("Name:")).size(12.0).color(t.text));
-    let width = if ui.available_width() < NAME_FIELD_ROOM { 100.0 } else { 120.0 };
-    if let Some(name) = widgets::text_field_named(ui, ("cb-ab", "name"), Some(tl!("Name:")), Some(&ab.name), width, 1).filter(|n| !n.is_empty()) {
-        app.run("artboard.setProps", json!({"index": i, "name": name})).ok();
+    if options {
+        art_option_boxes(app, ui, ui.available_width() < ART_OPTIONS_WIDTH);
     }
-    if widgets::icon_button(ui, "dc-artboard-options", tl!("Artboard Options"), false, 24.0).clicked() {
-        app.run("tool.options", json!({"tool": "artboard"})).ok();
-    }
-    if widgets::icon_button_enabled(ui, "dc-rearrange", tl!("Rearrange All Artboards"), false, n > 1, 24.0).clicked() {
-        open_rearrange(app);
-    }
-    ui.separator();
-    super::transform::link(app, ui);
-    ui.separator();
-    art_option_boxes(app, ui, ui.available_width() < ART_OPTIONS_WIDTH);
-    if ui.available_width() < INLINE_FIELDS_WIDTH {
+    if !transform || ui.available_width() < INLINE_FIELDS_WIDTH {
         return true;
     }
-    ui.separator();
+    if options {
+        ui.separator();
+    }
     let units = app.session.general_unit();
     let origin = app.ruler_origin();
     let refi = super::transform::reference_index(ui);
@@ -312,14 +322,11 @@ pub struct MenuFacts {
     pub(crate) any_art: bool,
 }
 
-/// Whether an unlocked artboard of `indices` has art that Fit to Artwork Bounds fits it to.
+/// Whether an unlocked artboard of `indices` has art that Fit to Artwork Bounds fits it to, kept by
+/// the document ([`vectorcraft_engine::DocState::any_art_to_fit`]): the canvas menu asks on every
+/// frame it is open without its [`MenuFacts`].
 pub(crate) fn fit_has_art(app: &VectorcraftApp, indices: &[usize]) -> bool {
-    app.session.active().is_some_and(|st| {
-        indices
-            .iter()
-            .filter_map(|i| st.doc.artboards.get(*i))
-            .any(|a| !a.locked && vectorcraft_render::encode::art_bounds_on(&st.doc, a.rect).is_some())
-    })
+    app.session.active().is_some_and(|st| st.any_art_to_fit(indices))
 }
 
 /// A right-click on the canvas at `p` with the Artboard tool: an artboard under the pointer that
@@ -506,6 +513,7 @@ fn select_copies(app: &mut VectorcraftApp, all: &[usize], r: &Value) {
     }
 }
 
+/// Draw the artboard list and its commands, filling the space above a sized panel's footer.
 pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let abs: Vec<String> = app.session.active().map(|d| d.doc.artboards.iter().map(|a| a.name.clone()).collect()).unwrap_or_default();
@@ -520,10 +528,17 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     let mut row_clicked = false;
     // A row dropped on another row: (from, to), the index it lands at.
     let mut dropped = None;
+    let fixed = widgets::panel_footer_bottom(ui).is_some();
+    let list_height = widgets::panel_list_height(ui, 220.0, 2.0 + ui.spacing().item_spacing.y);
     let list_rect = widgets::list_box(ui, |ui| {
-        ui.set_min_height(110.0);
+        ui.set_min_height(if fixed { list_height.min(110.0) } else { 110.0 });
         ui.spacing_mut().item_spacing.y = 0.0;
-        let scrolled = egui::ScrollArea::vertical().id_salt("ab-scroll").max_height(220.0).show(ui, |ui| {
+        let scroll = egui::ScrollArea::vertical()
+            .id_salt("ab-scroll")
+            .max_height(list_height)
+            .min_scrolled_height(list_height.min(64.0))
+            .auto_shrink([false, !fixed]);
+        let scrolled = scroll.show(ui, |ui| {
             for (i, name) in abs.iter().enumerate() {
                 let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click_and_drag());
                 if resp.drag_started() {

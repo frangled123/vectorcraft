@@ -99,3 +99,23 @@ mod tests {
         assert!(matches!(text("Open…"), Cow::Borrowed(_)));
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod fork_release_tests {
+    #[test]
+    fn updates_use_the_fork_and_accept_the_packaged_artifact_stem() {
+        let app = crate::UPDATE_APP;
+        assert_eq!(app.repo, "frangled123/vectorcraft");
+        assert_eq!(app.name, "Nodus");
+        assert!(app.stems().any(|stem| stem == "nodus"));
+        assert_eq!(app.bundle_id(), "ai.storyteller.vectorcraft");
+    }
+
+    #[test]
+    fn macos_declares_every_registered_interface_language() {
+        let plist = include_str!("../../../packaging/macos/Info.plist.in").to_lowercase();
+        for language in &crate::i18n::LANGUAGES {
+            assert!(plist.contains(&format!("<string>{}</string>", language.code)), "{}", language.code);
+        }
+    }
+}

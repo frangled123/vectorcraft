@@ -2,7 +2,7 @@ use super::entry::RgbInCmyk;
 use super::exporter::{constant_mask, cover, to_path, writable, xf};
 use super::{
     Affine, Arc, Archival, ColorOut, Compatibility, Document, Exporter, HashSet, Image, Metadata, Node, PageSettings, PdfError, PdfVersion, Rect,
-    Shape, Size, Standard, Vec2, find, krilla, rfind, write,
+    Shape, Size, Standard, Surface, Vec2, find, krilla, rfind, write,
 };
 
 /// A PDF being written, shared by export and print: the file's configuration and metadata, then
@@ -25,6 +25,10 @@ pub(crate) struct Writer {
     /// ([`Self::absorb`]): [`Self::finish`] finds the key of an image the writer couldn't decode.
     images: Vec<(String, Image)>,
 }
+
+/// What [`Writer::finish`] gives: the file, the warnings of its drawing, and the notes on the
+/// output intent asked for ([`crate::ExportReport::setting_notes`]).
+pub(crate) type Finished = (Vec<u8>, Vec<String>, Vec<String>);
 
 /// One page as [`Writer::page`] draws it: the art placed in a drawing space ([`Self::place`]),
 /// which [`Self::view`] maps onto the page.
@@ -125,7 +129,7 @@ impl Writer {
         let size = Size::from_wh(w.max(least) as f32, h.max(least) as f32).ok_or_else(|| PdfError::BadSetting(format!("page size {w} × {h}")))?;
         let at = |b: Rect| krilla::geom::Rect::from_ltrb(b.x0 as f32, b.y0 as f32, b.x1 as f32, b.y1 as f32);
         let mut page = self.pdf.document_mut().start_page_with(PageSettings::new(size).with_trim_box(at(sheet.trim)).with_bleed_box(at(sheet.bleed)));
-        let mut s = page.surface();
+        let mut s = Surface::page(page.surface(), size.height());
         let paper = Rect::new(0.0, 0.0, w, h);
         if sheet.negative {
             cover(&mut s, paper, 255, 1.0);
@@ -252,10 +256,11 @@ impl Writer {
     }
 
     /// The finished file (with the output intent and Trapped entries, and checked against its
-    /// standard) and the warnings of its drawing. PDF/X-1a spot colours keep their CMYK
+    /// standard), the warnings of its drawing, and the notes on the output intent asked for
+    /// ([`crate::ExportReport::setting_notes`]). PDF/X-1a spot colours keep their CMYK
     /// alternates. When the writer couldn't decode one of the images, its key is added to
     /// `left_out` ([`leaving_out_undecodable`]) and the writer's error is returned.
-    pub(crate) fn finish(mut self, left_out: &mut HashSet<String>, display_doc_title: bool) -> Result<(Vec<u8>, Vec<String>), PdfError> {
+    pub(crate) fn finish(mut self, left_out: &mut HashSet<String>, display_doc_title: bool) -> Result<Finished, PdfError> {
         let images = std::mem::take(&mut self.images);
         let mut bytes = self.pdf.finish().map_err(|e| {
             if let write::WriteError::Serialization(k) = &e
@@ -270,10 +275,9 @@ impl Writer {
         }
         let lab = !self.lab_spots.is_empty() && !self.out.standard.cmyk_only();
         let bytes = if lab { crate::lab_spot::lab_alternates(bytes, &self.lab_spots) } else { bytes };
-        let (bytes, more) = self.out.write_catalog(bytes, display_doc_title)?;
-        self.warnings.extend(more);
+        let (bytes, settings) = self.out.write_catalog(bytes, display_doc_title)?;
         self.warnings.extend(self.rgb_in_cmyk.warning());
-        Ok((crate::pdfx::finish(bytes, self.out.standard, self.pdf13)?, self.warnings))
+        Ok((crate::pdfx::finish(bytes, self.out.standard, self.pdf13)?, self.warnings, settings))
     }
 }
 

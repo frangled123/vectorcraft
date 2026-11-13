@@ -238,8 +238,24 @@ fn panel_frame(
     family: &str,
     draw: &dyn Fn(&mut VectorcraftApp, &mut egui::Ui),
 ) -> (Option<egui::Pos2>, bool) {
-    let mut input =
-        egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 800.0))), ..Default::default() };
+    panel_frame_at(ctx, app, None, events, family, draw)
+}
+
+/// [`panel_frame`] with the input's clock set to `time` seconds.
+fn panel_frame_at(
+    ctx: &egui::Context,
+    app: &mut VectorcraftApp,
+    time: Option<f64>,
+    events: Vec<egui::Event>,
+    family: &str,
+    draw: &dyn Fn(&mut VectorcraftApp, &mut egui::Ui),
+) -> (Option<egui::Pos2>, bool) {
+    let mut input = egui::RawInput {
+        time,
+        events,
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 800.0))),
+        ..Default::default()
+    };
     app.raw_input_hook(ctx, &mut input);
     let mut out = ctx.run_ui(input, |ui| {
         crate::font_menu::end_stale_preview(app, ui.ctx());
@@ -394,13 +410,16 @@ fn wheel_events_use_the_pointer_position_when_they_occurred() {
     assert_eq!(first_style(&app, id).font_family, "Inter", "the wheel was outside the field");
     assert_eq!(app.session.active().unwrap().history.undo.len(), before);
     assert!(ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. }))), "outside wheel input is left for its owner");
-    panel_frame(&ctx, &mut app, vec![wheel(line, -1.0, Default::default()), egui::Event::PointerMoved(outside)], "Inter", &draw);
+    let after_gap = |ctx: &egui::Context| Some(ctx.input(|i| i.time) + crate::widgets::WHEEL_STREAM_GAP);
+    let later = after_gap(&ctx);
+    panel_frame_at(&ctx, &mut app, later, vec![wheel(line, -1.0, Default::default()), egui::Event::PointerMoved(outside)], "Inter", &draw);
     assert_ne!(first_style(&app, id).font_family, "Inter", "the wheel was over the field before the pointer left");
     assert_eq!(app.session.active().unwrap().history.undo.len(), before + 1);
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(first_style(&app, id).font_family, "Inter");
     let button = |pos| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() };
-    panel_frame(&ctx, &mut app, vec![button(field), wheel(line, -1.0, Default::default()), button(outside)], "Inter", &draw);
+    let later = after_gap(&ctx);
+    panel_frame_at(&ctx, &mut app, later, vec![button(field), wheel(line, -1.0, Default::default()), button(outside)], "Inter", &draw);
     assert_ne!(first_style(&app, id).font_family, "Inter", "button events also carry the pointer's position");
     assert_eq!(app.session.active().unwrap().history.undo.len(), before + 1);
     app.run("edit.undo", json!({})).unwrap();
@@ -412,20 +431,32 @@ fn wheel_events_use_the_pointer_position_when_they_occurred() {
         source: egui::MouseWheelSource::Unknown,
     };
     panel_frame(&ctx, &mut app, vec![end], "Inter", &draw);
-    panel_frame(
+    let later = after_gap(&ctx);
+    panel_frame_at(
         &ctx,
         &mut app,
+        later,
         vec![
-            wheel(egui::MouseWheelUnit::Point, -2.0, Default::default()),
             egui::Event::PointerMoved(field),
             wheel(line, -1.0, Default::default()),
             egui::Event::PointerMoved(outside),
+            wheel(egui::MouseWheelUnit::Point, -2.0, Default::default()),
         ],
         "Inter",
         &draw,
     );
     assert_eq!(app.session.active().unwrap().history.undo.len(), before + 1);
     assert_eq!(ctx.input(|i| i.smooth_scroll_delta.y), -2.0, "only the outside wheel contributes to panel scrolling");
+    // A fractional turn made before the pointer reached the field does not count toward its notches.
+    let speed = ctx.options(|o| o.input_options.line_scroll_speed);
+    let later = after_gap(&ctx);
+    let early = wheel(egui::MouseWheelUnit::Point, -0.75 * speed, Default::default());
+    panel_frame_at(&ctx, &mut app, later, vec![early, egui::Event::PointerMoved(field)], "Inter", &draw);
+    let later = after_gap(&ctx);
+    panel_frame_at(&ctx, &mut app, later, vec![wheel(line, -0.5, Default::default())], "Inter", &draw);
+    assert_eq!(app.session.active().unwrap().history.undo.len(), before + 1, "half a notch on the field");
+    panel_frame(&ctx, &mut app, vec![wheel(line, -0.5, Default::default())], "Inter", &draw);
+    assert_eq!(app.session.active().unwrap().history.undo.len(), before + 2, "a whole notch on the field");
 }
 
 /// A turn queued for one document cannot restyle another document opened before its UI pass.
@@ -512,6 +543,97 @@ fn the_wheel_steps_the_families_in_properties_and_the_control_bar() {
         assert!(at(&next) > at("Inter"), "{place}: {next}");
         assert_eq!(app.session.active().unwrap().history.undo.len(), steps + 1, "{place}");
     }
+}
+
+/// The Character panel in a scroll area, its family field near the bottom of the view.
+fn scrolling_character_panel(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
+    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+        ui.add_space(250.0);
+        crate::panels::character::show(app, ui);
+        ui.add_space(600.0);
+    });
+}
+
+/// Scrolling a panel with a still pointer keeps going when the closed family field slides under
+/// the pointer, and the font stays as it was.
+#[test]
+fn scrolling_a_panel_past_the_family_field_under_a_still_pointer_keeps_the_font() {
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let mut app = VectorcraftApp::new(Session::new(), Default::default());
+    let id = selected_inter(&mut app);
+    let draw = scrolling_character_panel;
+    let mut field = None;
+    for _ in 0..3 {
+        field = panel_frame(&ctx, &mut app, vec![], "Inter", &draw).0;
+    }
+    let field = field.expect("the panel shows the family field");
+    let still = egui::pos2(field.x, field.y - 120.0);
+    panel_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(still)], "Inter", &draw);
+    let before = app.session.active().unwrap().history.undo.len();
+    let mut passed = false;
+    for _ in 0..240 {
+        let at = panel_frame(&ctx, &mut app, vec![wheel(egui::MouseWheelUnit::Point, -6.0, Default::default())], "Inter", &draw).0;
+        if at.is_some_and(|point| point.y < still.y - 30.0) {
+            passed = true;
+            break;
+        }
+    }
+    assert!(passed, "the panel scrolled the field past the pointer");
+    assert_eq!(first_style(&app, id).font_family, "Inter");
+    assert_eq!(app.session.active().unwrap().history.undo.len(), before);
+}
+
+/// A family field that a panel scrolled under a still pointer leaves later wheel input to the
+/// panel, including after the stream ends, until the pointer really moves.
+#[test]
+fn a_family_field_scrolled_under_a_still_pointer_takes_the_wheel_after_the_pointer_moves() {
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let mut app = VectorcraftApp::new(Session::new(), Default::default());
+    let id = selected_inter(&mut app);
+    let draw = scrolling_character_panel;
+    let mut time = 100.0;
+    let mut field = None;
+    for _ in 0..3 {
+        time += 0.02;
+        field = panel_frame_at(&ctx, &mut app, Some(time), vec![], "Inter", &draw).0;
+    }
+    let field = field.expect("the panel shows the family field");
+    let still = egui::pos2(field.x, field.y - 40.0);
+    time += 0.02;
+    panel_frame_at(&ctx, &mut app, Some(time), vec![egui::Event::PointerMoved(still)], "Inter", &draw);
+    let before = app.session.active().unwrap().history.undo.len();
+    let mut under = false;
+    for _ in 0..80 {
+        time += 0.02;
+        panel_frame_at(&ctx, &mut app, Some(time), vec![wheel(egui::MouseWheelUnit::Point, -3.0, Default::default())], "Inter", &draw);
+        let mut at = None;
+        for _ in 0..12 {
+            time += 0.02;
+            at = panel_frame_at(&ctx, &mut app, Some(time), vec![], "Inter", &draw).0;
+        }
+        if at.is_some_and(|point| (point.y - still.y).abs() < 4.0) {
+            under = true;
+            break;
+        }
+    }
+    assert!(under, "the panel scrolled the field under the pointer");
+    assert_eq!(app.session.active().unwrap().history.undo.len(), before);
+    time += 5.0;
+    let notch = || wheel(egui::MouseWheelUnit::Line, -1.0, Default::default());
+    panel_frame_at(&ctx, &mut app, Some(time), vec![notch()], "Inter", &draw);
+    assert_eq!(first_style(&app, id).font_family, "Inter", "the still pointer did not arm the field");
+    let mut at = None;
+    for _ in 0..12 {
+        time += 0.02;
+        at = panel_frame_at(&ctx, &mut app, Some(time), vec![], "Inter", &draw).0;
+    }
+    let at = at.expect("the field is still in view");
+    time += 5.0;
+    panel_frame_at(&ctx, &mut app, Some(time), vec![egui::Event::PointerMoved(at), notch()], "Inter", &draw);
+    assert_ne!(first_style(&app, id).font_family, "Inter", "the pointer moved onto the field");
+    assert_eq!(app.session.active().unwrap().history.undo.len(), before + 1);
 }
 
 /// #5253: a family the wheel steps to keeps the type's style when it has that style, else takes the
@@ -836,4 +958,143 @@ fn a_preview_stays_put_while_the_menu_is_still() {
     let (_, picked) = frame(&mut app, key(egui::Key::ArrowUp));
     assert_eq!(picked, Some(FontPick::EndPreview));
     assert_eq!(font(&app), "Inter");
+}
+
+/// What an open font menu drew: each text with its rectangle and clip rectangle, the rectangles of
+/// the samples, and the menu's rectangle.
+struct Drawn {
+    texts: Vec<(String, egui::Rect, egui::Rect)>,
+    samples: Vec<egui::Rect>,
+    menu: egui::Rect,
+}
+
+impl Drawn {
+    fn text(&self, label: &str) -> egui::Rect {
+        self.texts.iter().find(|(t, ..)| t == label).map(|(_, r, _)| *r).unwrap_or_else(|| panic!("{label} is drawn"))
+    }
+
+    /// The filters' rows, each by the centers of its first and last chips, in the UI's language.
+    fn filter_rows(&self) -> Vec<(f32, f32)> {
+        use crate::i18n::{current, t, tr_ctx};
+        let variable = tr_ctx(current(), "font-technology", "Variable");
+        [(t("All Scripts"), t("Thai")), ("★", t("Rounded")), (t("Script / Brush"), t("Decorative")), (t("Font Technology"), variable)]
+            .map(|(first, last)| (self.text(first).center().y, self.text(last).center().y))
+            .to_vec()
+    }
+
+    /// The filters lie on their four rows, none wrapped.
+    fn assert_filter_rows(&self) {
+        let rows = self.filter_rows();
+        for (i, (first, last)) in rows.iter().enumerate() {
+            assert!((first - last).abs() < 1.0, "filter row {i} wraps: its first chip at {first}, its last at {last}");
+        }
+        assert!(rows.windows(2).all(|w| w[1].0 > w[0].0 + 4.0), "four rows of filters, in order: {rows:?}");
+    }
+}
+
+/// Opens the font menu of a field `width` wide whose left edge is `left` points into a window of
+/// size `screen`, draws it until it settles and its samples are rendered, and returns what the
+/// last frame drew.
+fn open_menu(id: &str, left: f32, width: f32, screen: egui::Vec2) -> Drawn {
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let field = egui::Rect::from_min_size(egui::pos2(left, 10.0), egui::vec2(width, 30.0));
+    let frame = |events: Vec<egui::Event>| {
+        let input = egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)), ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
+                font_menu(ui, id, "Inter", width, None, MenuLook::default());
+            });
+        });
+        out.textures_delta.clear();
+        out.shapes
+    };
+    let click = field.min + egui::vec2(10.0, 10.0);
+    let button = |pressed| egui::Event::PointerButton { pos: click, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(click), button(true)]);
+    frame(vec![button(false)]);
+    for _ in 0..5 {
+        frame(vec![]);
+    }
+    crate::font_menu::wait_for_samples(&ctx);
+    let shapes = frame(vec![]);
+    let mut texts = vec![];
+    let mut samples = vec![];
+    for s in &shapes {
+        match &s.shape {
+            egui::Shape::Text(t) => texts.push((t.galley.text().to_string(), egui::Rect::from_min_size(t.pos, t.galley.size()), s.clip_rect)),
+            egui::Shape::Mesh(m) if m.texture_id != egui::TextureId::default() => samples.push(m.calc_bounds()),
+            _ => {}
+        }
+    }
+    let mut drawn = Drawn { texts, samples, menu: egui::Rect::NOTHING };
+    let filter = drawn.text(crate::i18n::t("Any Kind")).center();
+    drawn.menu = ctx.layer_id_at(filter).and_then(|l| ctx.memory(|m| m.area_rect(l.id))).expect("the menu is open");
+    drawn
+}
+
+/// A narrow field, such as the Control bar's, opens a menu wide enough for the filters on their
+/// rows and for the families' names, each drawn whole beside its sample.
+#[test]
+fn a_narrow_field_opens_a_menu_wide_enough_for_the_filters_and_names() {
+    let field = 115.0;
+    let d = open_menu("test-narrow", 20.0, field, egui::vec2(1200.0, 800.0));
+    d.assert_filter_rows();
+    assert!(d.menu.width() > 2.0 * field, "the menu is {} wide", d.menu.width());
+    let families = FontDb::global().menu_family_list();
+    // The field shows the current family too: only the names in the menu's rows.
+    let names: Vec<_> = d.texts.iter().filter(|(t, r, _)| r.top() > d.text("Variable").bottom() && families.iter().any(|f| f == t)).collect();
+    assert!(names.iter().any(|(_, r, _)| r.width() > field / 2.0), "a name wider than half the field is listed: {names:?}");
+    // The menu widens itself for names up to its limit; a longer name is cut.
+    for (name, r, clip) in names.iter().filter(|(_, r, _)| r.width() <= crate::font_menu::NAME_MAX) {
+        assert!(r.right() <= clip.right() + 0.5, "{name} ends at {} and is cut at {}", r.right(), clip.right());
+    }
+}
+
+/// In every UI language the filters keep their four rows unwrapped when the window has room for
+/// them: the longest translated labels set the menu's width.
+#[test]
+fn the_filter_rows_stay_whole_in_every_language() {
+    for lang in crate::i18n::Lang::all() {
+        crate::i18n::set_current(lang);
+        let d = open_menu(&format!("test-lang-{}", lang.code()), 20.0, 115.0, egui::vec2(2400.0, 900.0));
+        let rows = d.filter_rows();
+        for (i, (first, last)) in rows.iter().enumerate() {
+            assert!((first - last).abs() < 1.0, "{}: filter row {i} wraps in a menu {} wide", lang.code(), d.menu.width());
+        }
+    }
+    crate::i18n::set_current(crate::i18n::Lang::EN);
+}
+
+/// A menu opened near the window's right edge is wider than its field and stays in the window.
+#[test]
+fn a_menu_wider_than_its_field_stays_in_the_window() {
+    let screen = egui::vec2(700.0, 800.0);
+    let d = open_menu("test-edge", 600.0, 90.0, screen);
+    d.assert_filter_rows();
+    assert!(d.menu.width() > 200.0, "the menu is {} wide", d.menu.width());
+    assert!(d.menu.left() >= -0.5 && d.menu.right() <= screen.x + 0.5, "the menu at {:?} leaves the window", d.menu);
+}
+
+/// A docked panel's field is as wide as the panel: its menu takes that width, with the filters on
+/// the same rows as a narrow field's menu.
+#[test]
+fn a_wide_fields_menu_takes_its_width_with_the_same_filter_rows() {
+    let field = 480.0;
+    let d = open_menu("test-docked", 20.0, field, egui::vec2(1200.0, 800.0));
+    d.assert_filter_rows();
+    // The field is drawn 4 points narrower than its width; the menu's frame adds its margins.
+    assert!(d.menu.width() >= field - 4.0 && d.menu.width() < field + 40.0, "the menu is {} wide", d.menu.width());
+}
+
+/// Each sample takes its row's whole height.
+#[test]
+fn samples_fill_their_rows_height() {
+    let d = open_menu("test-samples", 20.0, 260.0, egui::vec2(1200.0, 800.0));
+    assert!(!d.samples.is_empty(), "samples are drawn");
+    let row = MenuLook::default().row;
+    for s in &d.samples {
+        assert!((s.height() - row).abs() < 0.5, "a sample {} high in a row {row} high", s.height());
+    }
 }

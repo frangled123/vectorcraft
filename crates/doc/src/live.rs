@@ -49,7 +49,7 @@ mod expand;
 mod mesh;
 mod warp;
 
-pub use blend_spec::{BlendDefaults, BlendEase, BlendEaseType, BlendOrientation, BlendSpacing, BlendSpec};
+pub use blend_spec::{BlendDefaults, BlendEase, BlendEaseType, BlendOrientation, BlendSpacing, BlendSpec, BlendSpineMode};
 #[cfg(test)]
 use blend_spec::{blend_color_shift, blend_ramp};
 pub use envelope::{
@@ -60,12 +60,12 @@ pub use envelope::{
 pub(crate) use expand::max_outset;
 pub use expand::{
     Hooks, MAX_GENERATED, Outliner, PatternTiles, affine_near, expand_deep, expand_deep_hooks, expand_live, expand_live_hooks, expand_live_with,
-    expanded_group, expanded_group_hooks, is_live, mesh_quad_nodes, subtree_has_live,
+    expanded_group, expanded_group_hooks, is_live, mesh_quad_nodes, mesh_warp_cost, mesh_warp_image, subtree_has_live,
 };
 #[cfg(test)]
 use mesh::grid_eval;
 pub use mesh::{Coons, GradientMesh, MeshAppearance, MeshPiece, MeshPoint, MeshQuad, default_fidelity, grid_points, nodes_bounds};
-pub use warp::{WarpStyle, fit_piece, map_nonlinear, map_nonlinear_within, pieces, warp_point};
+pub use warp::{WARP_NET, WarpNet, WarpStyle, fit_piece, map_nonlinear, map_nonlinear_within, pieces, uses_net, warp_point, warp_version};
 
 #[cfg(test)]
 mod tests {
@@ -131,6 +131,200 @@ mod tests {
         let (nx, ny) = warp_point(WarpStyle::Arc, 0.5, 0.0, 0.0, 1.0, 0.5, 0.25);
         let (r0, a) = (4.0 / PI, 0.5 / (4.0 / PI));
         assert!((nx - (r0 - 0.25) * a.sin()).abs() < 1e-12 && (ny - (r0 - (r0 - 0.25) * a.cos())).abs() < 1e-12);
+    }
+
+    /// Each warp style's Bézier net, at points worked out by a separate implementation of the same
+    /// nets: (style, bend %, horizontal and vertical distortion %, vertical, box w × h, (u, v)) →
+    /// the point in the box (origin at its top left, y down).
+    #[test]
+    fn warp_nets_bend_each_style_as_its_own_patch() {
+        #[rustfmt::skip]
+        let samples = [
+            ("arc", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, -31.1605665, 30.1243045),
+            ("arc", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 170.241998, 58.8743443),
+            ("arc", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 50.6087118, 47.6275948),
+            ("arcLower", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 18.8784581, 35.5028749),
+            ("arcLower", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 164.486168, 119.348666),
+            ("arcLower", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 38.1073767, 36.0911629),
+            ("arcUpper", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 17.3830689, 17.1599587),
+            ("arcUpper", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 160.498463, 86.7390371),
+            ("arcUpper", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 46.1081993, 36.0252855),
+            ("arch", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 16.261527, 11.6570838),
+            ("arch", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 164.984631, 57.3903712),
+            ("arch", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 49.2508226, 36.2064484),
+            ("bulge", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 16.261527, 22.6628335),
+            ("bulge", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 164.984631, 116.087703),
+            ("bulge", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 42.965576, 36.2064484),
+            ("shellLower", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 10.6489723, 25.9914004),
+            ("shellLower", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 208.565464, 99.4817585),
+            ("shellLower", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 41.043987, 36.1302767),
+            ("shellUpper", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, -21.8346746, 41.6042708),
+            ("shellUpper", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 160.791499, 90.3680631),
+            ("shellUpper", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 42.9282896, 36.1475509),
+            ("flag", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 20.0, 55.92),
+            ("flag", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 160.0, 55.44),
+            ("flag", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 58.098, 35.91),
+            ("wave", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 20.0, 40.8864),
+            ("wave", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 160.0, 83.7792),
+            ("wave", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 42.33, 35.91),
+            ("fish", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 20.0, 19.632),
+            ("fish", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 160.0, 62.352),
+            ("fish", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 44.994, 35.91),
+            ("rise", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 20.0, 146.64),
+            ("rise", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 160.0, 102.48),
+            ("rise", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 118.686, 35.91),
+            ("fisheye", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 9.1136, 27.2784),
+            ("fisheye", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 166.2208, 94.1472),
+            ("fisheye", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 47.514, 35.7048),
+            ("inflate", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, -0.16, 27.84),
+            ("inflate", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 166.48, 97.68),
+            ("inflate", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 45.75, 36.54),
+            ("squeeze", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 40.16, 27.84),
+            ("squeeze", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 153.52, 97.68),
+            ("squeeze", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 45.75, 36.0),
+            ("twist", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.1, 0.3, 32.2472, 27.9588),
+            ("twist", 60.0, 0.0, 0.0, false, 200.0, 100.0, 0.8, 0.9, 149.1136, 89.2224),
+            ("twist", -40.0, 30.0, -50.0, true, 150.0, 60.0, 0.25, 0.6, 45.56325, 33.8769),
+        ];
+        for (style, bend, dh, dv, vertical, w, h, u, v, x, y) in samples {
+            let Some(st) = WarpStyle::from_id(style) else { panic!("{style}") };
+            let p = WarpNet::new(st, bend / 100.0, dh / 100.0, dv / 100.0, w, h, vertical).at(u, v);
+            assert!(p.distance(Point::new(x, y)) < 1e-6, "{style} {bend} {dh} {dv} {vertical} ({u}, {v}): {p:?} vs ({x}, {y})");
+        }
+    }
+
+    /// Arc's edges are concentric circles: at 100 % on a 200 × 100 box the bottom edge is the half
+    /// circle through the bottom corners about the bottom's middle, and the top edge the one 100
+    /// further out. One cubic for a half circle strays up to 1.84 % of the radius from the circle.
+    #[test]
+    fn warp_net_arc_edges_are_concentric_circles() {
+        let net = WarpNet::new(WarpStyle::Arc, 1.0, 0.0, 0.0, 200.0, 100.0, false);
+        let center = Point::new(100.0, 100.0);
+        for i in 0..=20 {
+            let u = f64::from(i) / 20.0;
+            for (v, r) in [(0.0, 200.0), (1.0, 100.0)] {
+                let d = net.at(u, v).distance(center);
+                assert!((d - r).abs() < 0.0184 * r, "u {u}, v {v}: {d} from the center, not {r}");
+                // Its ends and middle lie on the circle.
+                if i % 10 == 0 {
+                    assert!((d - r).abs() < 1e-9, "u {u}, v {v}: {d} from the center, not {r}");
+                }
+            }
+        }
+        // Bend 0 leaves the box as it is.
+        for st in [WarpStyle::Arc, WarpStyle::ShellLower, WarpStyle::Bulge, WarpStyle::Twist] {
+            let flat = WarpNet::new(st, 0.0, 0.0, 0.0, 200.0, 100.0, false);
+            assert!(flat.at(0.3, 0.7).distance(Point::new(60.0, 70.0)) < 1e-9, "{st:?}");
+        }
+    }
+
+    /// The horizontal distortion scales each column of the net about its middle (narrowing the left
+    /// side for a positive value), then the vertical one each row (narrowing the top).
+    #[test]
+    fn warp_net_distortion_scales_the_columns_then_the_rows() {
+        let corners = |dh: f64, dv: f64| {
+            let net = WarpNet::new(WarpStyle::Arc, 0.0, dh, dv, 200.0, 100.0, false);
+            [net.at(0.0, 0.0), net.at(1.0, 0.0), net.at(0.0, 1.0), net.at(1.0, 1.0)]
+        };
+        let near = |got: [Point; 4], want: [(f64, f64); 4]| got.iter().zip(want).all(|(p, (x, y))| p.distance(Point::new(x, y)) < 1e-9);
+        assert!(near(corners(0.5, 0.0), [(0.0, 25.0), (200.0, -25.0), (0.0, 75.0), (200.0, 125.0)]), "{:?}", corners(0.5, 0.0));
+        assert!(near(corners(0.0, 0.5), [(50.0, 0.0), (150.0, 0.0), (-50.0, 100.0), (250.0, 100.0)]), "{:?}", corners(0.0, 0.5));
+        // Both coordinates scale: after the columns the top row runs from (0, 15) to (200, -15), and
+        // it then scales by 1.4 about its middle, (100, 0).
+        assert!(near(corners(0.3, -0.4), [(-40.0, 21.0), (240.0, -21.0), (40.0, 91.0), (160.0, 109.0)]), "{:?}", corners(0.3, -0.4));
+    }
+
+    /// Numbers no warp can take still give a finite net: a bend or distortion that isn't a number
+    /// counts as 0, and out of range as its limit; a size that isn't a number as 0.
+    #[test]
+    fn warp_net_takes_any_numbers() {
+        for st in [WarpStyle::Arc, WarpStyle::ShellUpper, WarpStyle::Wave, WarpStyle::Inflate, WarpStyle::Twist] {
+            for (b, dh, w, h) in
+                [(f64::NAN, 0.2, 10.0, 10.0), (5.0, f64::INFINITY, 10.0, 0.0), (-1e300, -3.0, f64::NAN, 1e-300), (1e-300, 0.0, 0.0, 0.0)]
+            {
+                for vertical in [false, true] {
+                    let p = WarpNet::new(st, b, dh, dh, w, h, vertical).at(0.3, 0.6);
+                    assert!(p.x.is_finite() && p.y.is_finite(), "{st:?} {b} {dh} {w} {h}: {p:?}");
+                }
+            }
+        }
+        let clamped = WarpNet::new(WarpStyle::Flag, 7.0, 0.0, 0.0, 200.0, 100.0, false);
+        assert_eq!(clamped, WarpNet::new(WarpStyle::Flag, 1.0, 0.0, 0.0, 200.0, 100.0, false));
+    }
+
+    /// A box near the largest finite size still warps: Flag on a 1e308 × 100 box moves points only
+    /// up and down, as on a 1 × 1e-306 one scaled up, and on a 1e308 × 1e-300 box keeps the box's
+    /// height. Fisheye at 100 % on a 1.7e308 square, whose net goes past the largest finite number,
+    /// gives finite points inside the box and past it, and the unit square's points scaled up where
+    /// those are finite. Fisheye moves y by the height alone, so on boxes of the largest finite
+    /// width and a height of 1e-300 or 100 every y is the unit square's times the height, also
+    /// where x goes past the largest finite number.
+    #[test]
+    fn warp_net_bends_a_huge_box_without_overflowing() {
+        let w = 1e308;
+        let flag = WarpNet::new(WarpStyle::Flag, 0.5, 0.0, 0.0, w, 100.0, false);
+        let small = WarpNet::new(WarpStyle::Flag, 0.5, 0.0, 0.0, 1.0, 100.0 / w, false);
+        for (u, v) in [(0.0, 0.0), (0.3, 0.6), (0.9, 1.0), (1.0, 0.5)] {
+            let (p, q) = (flag.at(u, v), small.at(u, v));
+            assert!(p.is_finite(), "({u}, {v}): {p:?}");
+            assert!((p.x - u * w).abs() <= 1e-12 * w, "({u}, {v}): {p:?}");
+            assert!((p.y - q.y * w).abs() <= 1e-9 * p.y.abs().max(1.0), "({u}, {v}): {p:?} against {q:?}");
+        }
+        let thin = WarpNet::new(WarpStyle::Flag, 0.5, 0.0, 0.0, w, 1e-300, false);
+        assert_eq!(thin.at(0.0, 1.0), Point::new(0.0, 1e-300));
+        let fisheye = WarpNet::new(WarpStyle::Fisheye, 1.0, 0.0, 0.0, 1.7e308, 1.7e308, false);
+        for (u, v) in [(0.1, 0.1), (0.8, 0.3), (1.5, 0.5), (3.0, 3.0)] {
+            let p = fisheye.at(u, v);
+            assert!(p.is_finite(), "({u}, {v}): {p:?}");
+        }
+        let unit = WarpNet::new(WarpStyle::Fisheye, 1.0, 0.0, 0.0, 1.0, 1.0, false);
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(f64::MIN_POSITIVE);
+        let (p, q) = (fisheye.at(0.1, 0.1), unit.at(0.1, 0.1));
+        assert!(near(p.x, q.x * 1.7e308) && near(p.y, q.y * 1.7e308), "{p:?} against {q:?}");
+        // The bottom of a box with a subnormal height stays exactly at that height: the net is
+        // built on the box halved, and the height's lowest bit but one is set.
+        let low = f64::MIN_POSITIVE / 4.0 + f64::from_bits(2);
+        let sub = WarpNet::new(WarpStyle::Fisheye, 1.0, 0.0, 0.0, f64::MAX, low, false).at(0.0, 1.0);
+        assert_eq!(sub.y, low, "{sub:?}");
+        for h in [1e-300, 100.0] {
+            let tall = WarpNet::new(WarpStyle::Fisheye, 1.0, 0.0, 0.0, f64::MAX, h, false);
+            for (u, v) in [(0.1, 0.1), (0.9, 0.4), (0.5, 0.8)] {
+                let (p, q) = (tall.at(u, v), unit.at(u, v));
+                assert!(p.is_finite() && near(p.y, q.y * h), "h {h}, ({u}, {v}): {p:?} against {q:?}");
+            }
+        }
+    }
+
+    /// Content with no width or no height takes the middle of a warp envelope's patch along that
+    /// side: under Arc a vertical line stays vertical, under Bulge a horizontal line stays straight.
+    #[test]
+    fn warp_envelopes_bend_flat_content_as_the_middle_of_the_patch() {
+        let warp = |style: &str| EnvelopeKind::Warp { style: style.into(), bend: 50.0, h: 0.0, v: 0.0, horizontal: true, version: WARP_NET };
+        let arc = warp("arc");
+        let map = envelope_mapper(&arc, Rect::new(100.0, 0.0, 100.0, 100.0));
+        for y in [0.0, 30.0, 100.0] {
+            let p = map(Point::new(100.0, y));
+            assert!((p.x - 100.0).abs() <= 1e-9, "{y}: {p:?}");
+        }
+        let bulge = warp("bulge");
+        let map = envelope_mapper(&bulge, Rect::new(0.0, 50.0, 200.0, 50.0));
+        for x in [0.0, 70.0, 200.0] {
+            let p = map(Point::new(x, 50.0));
+            assert!((p.y - 50.0).abs() <= 1e-9, "{x}: {p:?}");
+        }
+    }
+
+    /// A warp envelope's map version: none in a file reads as 0 (the earlier map), 0 is written
+    /// as none, so files keep their bytes, and the nets' version is written.
+    #[test]
+    fn warp_envelopes_write_their_map_version_only_when_it_has_one() {
+        let old: EnvelopeKind = serde_json::from_str(r#"{"type":"warp","style":"arc","bend":20}"#).unwrap();
+        assert!(matches!(old, EnvelopeKind::Warp { version: 0, .. }), "{old:?}");
+        assert!(!serde_json::to_string(&old).unwrap().contains("version"));
+        let new = EnvelopeKind::Warp { style: "arc".into(), bend: 20.0, h: 0.0, v: 0.0, horizontal: true, version: WARP_NET };
+        let text = serde_json::to_string(&new).unwrap();
+        assert!(text.contains(r#""version":1"#), "{text}");
+        assert_eq!(serde_json::from_str::<EnvelopeKind>(&text).unwrap(), new);
     }
     use vectorcraft_geom::shapes;
 
@@ -537,7 +731,7 @@ mod tests {
     #[test]
     fn an_envelope_maps_from_its_box_with_its_margins() {
         let rect = Node::path(NodeId(2), vectorcraft_geom::shapes::rectangle(Rect::new(10.0, 20.0, 110.0, 70.0)), crate::Appearance::default_art());
-        let kind = EnvelopeKind::Warp { style: "arc".into(), bend: 0.0, h: 0.0, v: 0.0, horizontal: true };
+        let kind = EnvelopeKind::Warp { style: "arc".into(), bend: 0.0, h: 0.0, v: 0.0, horizontal: true, version: 0 };
         let content = [Arc::new(rect)];
         let src = |content: &[Arc<Node>], frame: Affine, options: EnvelopeOptions| EnvelopeMap::new(content, &kind, frame, options).unwrap().src();
         // Top, bottom, left and right.
@@ -641,6 +835,168 @@ mod tests {
         let m = GradientMesh::for_path(&shapes::rectangle(Rect::new(0.0, 0.0, 90.0, 60.0)), 1, 1, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
         let e = m.edge_u(0, 0);
         assert!(e.p1.distance(Point::new(30.0, 0.0)) < 1e-6 && e.p2.distance(Point::new(60.0, 0.0)) < 1e-6, "{e:?}");
+    }
+
+    /// The polylines of `bp` flattened to 0.01 pt.
+    fn flattened(bp: &BezPath) -> Vec<Vec<Point>> {
+        let mut out: Vec<Vec<Point>> = vec![];
+        vectorcraft_geom::kurbo::flatten(bp.iter(), 0.01, |el| match el {
+            vectorcraft_geom::PathEl::MoveTo(p) => out.push(vec![p]),
+            vectorcraft_geom::PathEl::LineTo(p) => out.last_mut().into_iter().for_each(|v| v.push(p)),
+            vectorcraft_geom::PathEl::ClosePath => out.last_mut().into_iter().for_each(|v| v.push(v[0])),
+            _ => {}
+        });
+        out
+    }
+
+    /// The distance from `p` to the nearest of `lines`.
+    fn off_lines(lines: &[Vec<Point>], p: Point) -> f64 {
+        lines
+            .iter()
+            .flat_map(|v| v.windows(2))
+            .map(|w| {
+                let d = w[1] - w[0];
+                let t = if d.hypot2() > 0.0 { ((p - w[0]).dot(d) / d.hypot2()).clamp(0.0, 1.0) } else { 0.0 };
+                p.distance(w[0] + d * t)
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// How far apart the border of `m` and the outline of `path` are, in points: the larger of the
+    /// farthest a point of either lies from the other.
+    fn mesh_border_off_path(m: &GradientMesh, path: &PathData) -> f64 {
+        let (border, outline) = (flattened(&m.outline().to_bezpath()), flattened(&path.to_bezpath()));
+        let one = border.iter().flatten().map(|p| off_lines(&outline, *p)).fold(0.0, f64::max);
+        let other = outline.iter().flatten().map(|p| off_lines(&border, *p)).fold(0.0, f64::max);
+        one.max(other)
+    }
+
+    /// #2752: a gradient mesh keeps the exact outline of the path it is made from, sharp corners
+    /// included, whether made by Create Gradient Mesh (1×1 and 4×4) or by a Mesh tool click at a
+    /// point inside. Before, the border of each mesh was one cubic per edge between four corners
+    /// near the bounding box's: up to 49 pt off a five-point star, 54 pt off a notched rectangle.
+    #[test]
+    fn a_mesh_keeps_the_outline_of_every_shape() {
+        const OFF: f64 = 0.1;
+        let poly = |pts: &[(f64, f64)]| PathData::single(SubPath::polyline(&pts.iter().map(|&(x, y)| Point::new(x, y)).collect::<Vec<_>>(), true));
+        let curves = |start: (f64, f64), cubics: &[[(f64, f64); 3]]| {
+            let mut bp = BezPath::new();
+            bp.move_to(start);
+            for [a, b, c] in cubics {
+                bp.curve_to(*a, *b, *c);
+            }
+            bp.close_path();
+            PathData::from_bezpath(&bp)
+        };
+        let box_ = Rect::new(100.0, 100.0, 500.0, 400.0);
+        let heart = curves(
+            (300.0, 400.0),
+            &[
+                [(200.0, 320.0), (100.0, 250.0), (100.0, 170.0)],
+                [(100.0, 100.0), (180.0, 70.0), (230.0, 90.0)],
+                [(270.0, 105.0), (290.0, 130.0), (300.0, 150.0)],
+                [(310.0, 130.0), (330.0, 105.0), (370.0, 90.0)],
+                [(420.0, 70.0), (500.0, 100.0), (500.0, 170.0)],
+                [(500.0, 250.0), (400.0, 320.0), (300.0, 400.0)],
+            ],
+        );
+        let teardrop = curves(
+            (300.0, 100.0),
+            &[
+                [(350.0, 200.0), (420.0, 250.0), (420.0, 320.0)],
+                [(420.0, 386.0), (366.0, 440.0), (300.0, 440.0)],
+                [(234.0, 440.0), (180.0, 386.0), (180.0, 320.0)],
+                [(180.0, 250.0), (250.0, 200.0), (300.0, 100.0)],
+            ],
+        );
+        let shapes: [(&str, PathData, Point); 14] = [
+            ("rectangle", shapes::rectangle(box_), Point::new(260.0, 230.0)),
+            ("rotated rectangle", shapes::rectangle(box_).transformed(Affine::rotate_about(0.5, box_.center())), Point::new(280.0, 240.0)),
+            ("triangle", poly(&[(300.0, 100.0), (500.0, 400.0), (100.0, 400.0)]), Point::new(300.0, 320.0)),
+            ("five-point star", shapes::star(Point::new(300.0, 300.0), 200.0, 80.0, 5, 0.0), Point::new(300.0, 300.0)),
+            ("twelve-point star", shapes::star(Point::new(300.0, 300.0), 200.0, 140.0, 12, 0.0), Point::new(300.0, 300.0)),
+            (
+                "L-shape",
+                poly(&[(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (400.0, 300.0), (400.0, 400.0), (100.0, 400.0)]),
+                Point::new(150.0, 350.0),
+            ),
+            ("rounded rectangle", shapes::rounded_rectangle(box_, 40.0), Point::new(260.0, 230.0)),
+            ("heart", heart, Point::new(300.0, 250.0)),
+            ("teardrop", teardrop, Point::new(300.0, 330.0)),
+            ("ellipse", shapes::ellipse(box_), Point::new(200.0, 330.0)),
+            ("thin rectangle", shapes::rectangle(Rect::new(100.0, 100.0, 500.0, 110.0)), Point::new(260.0, 104.0)),
+            (
+                "notched rectangle",
+                poly(&[(100.0, 100.0), (250.0, 100.0), (300.0, 200.0), (350.0, 100.0), (500.0, 100.0), (500.0, 400.0), (100.0, 400.0)]),
+                Point::new(260.0, 300.0),
+            ),
+            // A notch shorter than the steps along the outline an edge is checked at, and deeper
+            // than the tolerance.
+            (
+                "rectangle with a tiny notch",
+                poly(&[(100.0, 100.0), (301.1, 100.0), (301.2, 100.3), (301.3, 100.0), (500.0, 100.0), (500.0, 400.0), (100.0, 400.0)]),
+                Point::new(260.0, 300.0),
+            ),
+            // An outline that crosses itself, whose two lobes' areas cancel.
+            ("bow tie", poly(&[(100.0, 100.0), (500.0, 400.0), (500.0, 100.0), (100.0, 400.0)]), Point::new(150.0, 250.0)),
+        ];
+        // Every shape and way of making the mesh is checked, and all that stray are named.
+        let mut strays = vec![];
+        for (name, path, click) in shapes {
+            for (rows, cols) in [(1, 1), (4, 4)] {
+                let m = GradientMesh::for_path(&path, rows, cols, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
+                let off = mesh_border_off_path(&m, &path);
+                if off >= OFF {
+                    strays.push(format!("{name}, {rows}×{cols}: border {off:.2} pt off the outline"));
+                }
+            }
+            let mut m = GradientMesh::for_path(&path, 1, 1, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
+            assert!(m.add_lines_at(click, 0.0).is_some(), "{name}: the click at {click:?} is outside the mesh");
+            let off = mesh_border_off_path(&m, &path);
+            if off >= OFF {
+                strays.push(format!("{name}, Mesh tool click: border {off:.2} pt off the outline"));
+            }
+        }
+        assert!(strays.is_empty(), "{strays:#?}");
+    }
+
+    /// The lines a mesh takes to keep a path's outline are as few as do it: a rectangle's and an
+    /// ellipse's meshes keep the rows and columns asked for, and a star's 1×1 mesh takes lines
+    /// through its points, at most one each way per anchor. Paths without an outline to follow
+    /// still give a mesh (an open path closes straight; a line there and back maps onto its box),
+    /// and a point that isn't finite gives none.
+    #[test]
+    fn a_mesh_takes_lines_only_where_the_outline_needs_them() {
+        let box_ = Rect::new(100.0, 100.0, 500.0, 400.0);
+        for path in [shapes::rectangle(box_), shapes::ellipse(box_)] {
+            for (rows, cols) in [(1, 1), (4, 4), (2, 5)] {
+                let m = GradientMesh::for_path(&path, rows, cols, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
+                assert_eq!((m.rows, m.cols), (rows, cols));
+            }
+        }
+        let star = shapes::star(Point::new(300.0, 300.0), 200.0, 80.0, 5, 0.0);
+        let m = GradientMesh::for_path(&star, 1, 1, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
+        assert!(m.rows > 1 && m.cols > 1 && m.rows <= 10 && m.cols <= 10 && m.is_valid(), "{}×{}", m.rows, m.cols);
+        // Every anchor of the star is a point of the mesh.
+        for a in &star.subpaths[0].anchors {
+            assert!(m.points.iter().any(|q| q.p.distance(a.p) < 1e-6), "{:?} is not a mesh point", a.p);
+        }
+        // An open path closes with a straight segment.
+        let open = PathData::single(SubPath::polyline(&[Point::new(0.0, 0.0), Point::new(100.0, 0.0), Point::new(100.0, 80.0)], false));
+        let m = GradientMesh::for_path(&open, 2, 2, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
+        let closed = PathData::single(SubPath::polyline(&[Point::new(0.0, 0.0), Point::new(100.0, 0.0), Point::new(100.0, 80.0)], true));
+        assert!(mesh_border_off_path(&m, &closed) < 0.1);
+        // A line there and back.
+        let line = PathData::single(SubPath::polyline(&[Point::new(0.0, 0.0), Point::new(100.0, 50.0)], true));
+        let m = GradientMesh::for_path(&line, 1, 1, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
+        assert!(m.is_valid() && m.points.iter().all(|q| q.p.is_finite()));
+        let mut nan = shapes::rectangle(box_);
+        nan.subpaths[0].anchors[1].p.x = f64::NAN;
+        assert!(GradientMesh::for_path(&nan, 1, 1, Color::BLACK, MeshAppearance::Flat, 0.0).is_none());
+        // A path of many anchors stays within the line limit and keeps its outline.
+        let many = shapes::star(Point::new(300.0, 300.0), 200.0, 190.0, 400, 0.0);
+        let m = GradientMesh::for_path(&many, 1, 1, Color::BLACK, MeshAppearance::Flat, 0.0).unwrap();
+        assert!(m.is_valid() && m.rows as usize <= mesh::MAX_BORDER_LINES && m.cols as usize <= mesh::MAX_BORDER_LINES, "{}×{}", m.rows, m.cols);
     }
 
     #[test]

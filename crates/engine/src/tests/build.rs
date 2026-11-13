@@ -793,8 +793,9 @@ fn shape_builder_applies_a_merge_before_what_comes_next() {
             let labels: Vec<&str> = s.doc().unwrap().history.undo.iter().rev().take(2).map(|e| e.label.as_str()).collect();
             assert_eq!(labels, ["Move", "Shape Builder"]);
         }),
-        // The proof views redraw every document (a new revision); they are left off, as the
-        // other tests of the process-wide proof view expect.
+        // The proof views apply the merge first by command id (`WAIT_FOR_TOOL_EDIT`), also when
+        // the view does not change and no document gets a new revision. They are left off, as
+        // the other tests of the process-wide proof view expect.
         ("Separations Preview", |s, _, _| {
             s.execute("view.separationsPreview", &json!({"on": false})).unwrap();
         }),
@@ -806,6 +807,13 @@ fn shape_builder_applies_a_merge_before_what_comes_next() {
         }),
         ("Proof Setup", |s, _, _| {
             s.execute("view.proofSetup", &json!({})).unwrap();
+        }),
+        ("a proof view that changes", |s, _, _| {
+            let _v = crate::tests_colormgmt::DefaultView::new();
+            s.execute("view.proofColors", &json!({"on": true})).unwrap();
+            let on = s.doc().unwrap().revision;
+            s.execute("view.proofColors", &json!({"on": false})).unwrap();
+            assert!(s.doc().unwrap().revision > on, "the view changes and the documents get new revisions");
         }),
         ("a preference", |s, _, _| {
             let every = s.prefs.gridline_every;
@@ -822,6 +830,13 @@ fn shape_builder_applies_a_merge_before_what_comes_next() {
         ("Add Font Files", |s, _, _| {
             // No files: the command fails after the merge.
             assert!(s.execute("text.addFontFiles", &json!({"files": []})).is_err());
+        }),
+        ("a call its schema refuses", |s, _, _| {
+            // The refused call adds no undo step of its own: the merge's is the last one.
+            let e = s.execute("view.saved.new", &json!({"center": [0, 0], "zoom": 0})).unwrap_err().to_string();
+            assert!(e.contains("`zoom`"), "{e}");
+            assert!(s.doc().unwrap().doc.views.is_empty());
+            assert_eq!(s.doc().unwrap().history.undo.last().map(|e| e.label.as_str()), Some("Shape Builder"));
         }),
     ];
     let _proof = crate::tests_colormgmt::GLOBAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -2939,6 +2954,120 @@ fn merged_live_paint_groups_keep_the_bottom_groups_gap_options() {
 }
 
 #[test]
+fn live_paint_bucket_drag_fills_multiple_faces() {
+    let mut s = session();
+    let g = live(&mut s);
+    let v = ViewInfo::default();
+    s.select_tool("livePaintBucket", v).unwrap();
+    s.paint.fill = Paint::solid(Color::rgb(0.0, 1.0, 1.0));
+    let before = s.doc().unwrap().doc.clone();
+    s.pointer(&PointerEvent::new(PointerKind::Down, 25.0, 50.0), v).unwrap();
+    // Skip the middle face between pointer events, as can happen in a fast drag.
+    s.pointer(&PointerEvent::new(PointerKind::Drag, 125.0, 50.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, 125.0, 50.0), v).unwrap();
+    let gn = node(&s, g);
+    for x in [25.0, 75.0, 125.0] {
+        let f = vectorcraft_tools::builder::face_at(&gn, Point::new(x, 50.0)).unwrap();
+        assert_eq!(f.appearance.fill_paint(), s.paint.fill, "dragged face at {x}");
+    }
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().doc, before, "one Undo restores every face");
+    s.pointer(&PointerEvent::new(PointerKind::Move, 125.0, 50.0), v).unwrap();
+    assert!(!s.overlays(v).is_empty(), "hover still highlights a face");
+    assert_eq!(s.doc().unwrap().doc, before, "hover does not paint");
+}
+
+#[test]
+fn live_paint_bucket_drag_crosses_thin_grid_cells_and_can_cancel() {
+    for (deferred, cancel) in [(false, false), (false, true), (true, false)] {
+        let mut s = session();
+        let ids = [rect(&mut s, 0.0, 0.0, 150.0, 100.0), line(&mut s, (50.0, 0.0), (50.0, 100.0)), line(&mut s, (50.25, 0.0), (50.25, 100.0))];
+        s.execute("select.set", &json!({"ids": ids.map(|i| i.0)})).unwrap();
+        let before = s.doc().unwrap().doc.clone();
+        let v = ViewInfo::default();
+        s.select_tool("livePaintBucket", v).unwrap();
+        s.prefs.real_time_drawing = !deferred;
+        s.paint.fill = Paint::solid(Color::rgb(0.0, 1.0, 1.0));
+        s.pointer(&PointerEvent::new(PointerKind::Down, 25.0, 50.0), v).unwrap();
+        s.pointer(&PointerEvent::new(PointerKind::Drag, 125.0, 50.0), v).unwrap();
+        if cancel {
+            assert!(s.tool_busy());
+            assert!(s.tool_claims_key(ToolKey::Escape, v));
+            s.tool_key(ToolKey::Escape, Mods::default(), v).unwrap();
+            assert!(!s.tool_busy());
+            assert!(!s.tool_claims_key(ToolKey::Escape, v));
+        }
+        s.pointer(&PointerEvent::new(PointerKind::Up, 125.0, 50.0), v).unwrap();
+        if !cancel {
+            let g = s.doc().unwrap().selection.objects[0];
+            let gn = node(&s, g);
+            for x in [25.0, 50.125, 125.0] {
+                let f = vectorcraft_tools::builder::face_at(&gn, Point::new(x, 50.0)).unwrap();
+                assert_eq!(f.appearance.fill_paint(), s.paint.fill, "deferred={deferred}, x={x}");
+            }
+            s.execute("edit.undo", &json!({})).unwrap();
+        }
+        assert!(s.doc().unwrap().doc == before, "deferred={deferred}, cancel={cancel}: original paths and selection art must be restored");
+    }
+}
+
+#[test]
+fn live_paint_bucket_long_drag_keeps_late_turns_and_release_as_one_undo() {
+    for cancel in [false, true] {
+        let mut s = session();
+        let ids = [rect(&mut s, 0.0, 0.0, 150.0, 100.0), line(&mut s, (50.0, 0.0), (50.0, 100.0)), line(&mut s, (100.0, 0.0), (100.0, 100.0))];
+        s.execute("select.set", &json!({"ids": ids.map(|id| id.0)})).unwrap();
+        let before = s.doc().unwrap().doc.clone();
+        let v = ViewInfo::default();
+        s.select_tool("livePaintBucket", v).unwrap();
+        s.prefs.real_time_drawing = false;
+        s.paint.fill = Paint::solid(Color::rgb(0.0, 1.0, 1.0));
+        s.pointer(&PointerEvent::new(PointerKind::Down, 25.0, 50.0), v).unwrap();
+        for i in 1..4096 {
+            s.pointer(&PointerEvent::new(PointerKind::Drag, 25.0 + f64::from(i) / 10000.0, 50.0), v).unwrap();
+        }
+        // Turn around the middle face after the chunk limit, then enter the right face on Up.
+        for (x, y) in [(25.0, 150.0), (125.0, 150.0)] {
+            s.pointer(&PointerEvent::new(PointerKind::Drag, x, y), v).unwrap();
+        }
+        if cancel {
+            s.tool_key(ToolKey::Escape, Mods::default(), v).unwrap();
+        }
+        s.pointer(&PointerEvent::new(PointerKind::Up, 125.0, 50.0), v).unwrap();
+        if !cancel {
+            let g = s.doc().unwrap().selection.objects[0];
+            let gn = node(&s, g);
+            for x in [25.0, 125.0] {
+                assert_eq!(vectorcraft_tools::builder::face_at(&gn, Point::new(x, 50.0)).unwrap().appearance.fill_paint(), s.paint.fill);
+            }
+            assert_eq!(vectorcraft_tools::builder::face_at(&gn, Point::new(75.0, 50.0)).unwrap().appearance.fill_paint(), Paint::solid(Color::WHITE));
+            s.execute("edit.undo", &json!({})).unwrap();
+        }
+        assert!(s.doc().unwrap().doc == before, "long drag is one cancellable undo step");
+    }
+}
+
+#[test]
+fn live_paint_bucket_drag_rejects_invalid_points_atomically() {
+    let mut s = session();
+    let g = live(&mut s);
+    let before = s.doc().unwrap().doc.clone();
+    for points in
+        [json!([]), json!([[26.0, 50.0]]), json!([[25.0, 50.0], [null, 0]]), json!([[25.0, 50.0], [1e30, 0]]), json!(vec![[25.0, 50.0]; 4097])]
+    {
+        assert!(s.execute("livePaint.fill", &json!({"group": g.0, "point": [25.0, 50.0], "points": points})).is_err());
+        assert_eq!(s.doc().unwrap().doc, before);
+    }
+    for continuation in [json!(null), json!([[[26.0, 50.0], [125.0, 50.0]]]), json!([vec![[25.0, 50.0]; 4097]])] {
+        assert!(
+            s.execute("livePaint.fill", &json!({"group": g.0, "point": [25.0, 50.0], "points": [[25.0, 50.0]], "continuation": continuation}))
+                .is_err()
+        );
+        assert_eq!(s.doc().unwrap().doc, before);
+    }
+}
+
+#[test]
 fn live_paint_bucket_tool_fills_face() {
     let mut s = session();
     let g = live(&mut s);
@@ -3575,6 +3704,37 @@ fn a_trace_run_hands_its_trace_to_the_command() {
     assert!(s.trace_hand_off.is_none(), "dropped");
     let bb = outline(&traced_paths(&node(&s, NodeId(moved["id"].as_u64().unwrap())))[0]).0.bounds().unwrap();
     assert!((bb.center().x - 160.0).abs() < 1.5, "traced where the image is now: {bb:?}");
+}
+
+/// A plug-in run that calls Image Trace and then fails leaves a trace handed in for the command in
+/// place, as it leaves the document.
+#[test]
+fn a_failed_plugin_run_keeps_a_handed_in_trace() {
+    use vectorcraft_plugins::wat as tpl;
+    let (id, cmd, args) = ("test.engine.calltrace", "imageTrace.make", r#"{"params":{"ignoreWhite":true}}"#);
+    let mut s = session();
+    s.allow_plugin_grants_from_requests();
+    image_doc(&mut s);
+    let p: Value = serde_json::from_str(args).unwrap();
+    let run = cmd::TraceRun::prepare(&s, cmd, &p).unwrap();
+    run.run(&|_, _| true).unwrap().hand_in(&mut s);
+    let grant = json!(["doc.read", "doc.write", "commands"]);
+    let manifest = format!(r#"{{"id":"{id}","name":"Test {id}","kind":"filter","api":2,"permissions":{grant},"commandAllowlist":["{cmd}"]}}"#);
+    let imports = format!(
+        r#"(import "env" "vc_call" (func $vc_call (param i32 i32 i32 i32) (result i32)))
+  (data (i32.const 0x2000) "{}") (data (i32.const 0x2100) "{}")"#,
+        tpl::string(cmd),
+        tpl::string(args)
+    );
+    let first =
+        format!("(drop (call $vc_call (i32.const 0x2000) (i32.const {}) (i32.const 0x2100) (i32.const {}))) unreachable", cmd.len(), args.len());
+    let wasm = wat::parse_str(tpl::with_imports(&manifest, &imports, &first, "{}")).unwrap();
+    s.execute("plugin.install", &json!({"dataBase64": vectorcraft_format::base64_encode(&wasm), "grant": grant, "replace": true})).unwrap();
+    assert!(s.execute("plugin.run", &json!({"id": id, "ids": []})).is_err());
+    assert!(s.trace_hand_off.is_some(), "the trace is still handed in");
+    assert!(s.execute(cmd, &p).is_ok());
+    assert!(s.trace_hand_off.is_none(), "taken");
+    s.execute("plugin.remove", &json!({"id": id})).unwrap();
 }
 
 #[test]

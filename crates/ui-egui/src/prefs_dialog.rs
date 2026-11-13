@@ -19,6 +19,9 @@ pub const UI_FIELDS: &[(&str, &str, &str)] = &[
     ("__taskBar", "General", "Enable Contextual Task Bar"),
 ];
 
+/// The Units ▸ General value Reset Preferences put in the dialog, while it is still the field's value.
+const RESET_UNITS: &str = "__resetUnits";
+
 /// Whether User Interface shows VectorCraft Title Bar on Every Desktop (`appTitleBar`): Linux and the
 /// BSDs, where the desktop may draw the window's frame. macOS and Windows never read it.
 const APP_TITLE_BAR_SHOWN: bool = cfg!(not(any(target_arch = "wasm32", target_os = "macos", target_os = "windows")));
@@ -78,7 +81,7 @@ pub(crate) fn search(query: &str) -> Vec<Setting> {
     if q.is_empty() {
         return vec![];
     }
-    let hit = |s: &str| !s.is_empty() && (tl!(s).to_lowercase().contains(&q) || s.to_lowercase().contains(&q));
+    let hit = |s: &str| !s.is_empty() && (crate::branding::text(tl!(s)).to_lowercase().contains(&q) || s.to_lowercase().contains(&q));
     let mut found: Vec<Setting> = settings().filter(|s| hit(s.label) || hit(s.section) || hit(s.category)).collect();
     found.sort_by_key(|s| PREF_CATEGORIES.iter().position(|c| *c == s.category).unwrap_or(usize::MAX));
     found
@@ -160,7 +163,7 @@ fn search_results(ui: &mut egui::Ui, d: &mut Dialog, query: &str) {
     egui::ScrollArea::vertical().id_salt("prefs-search-results").max_height(380.0).auto_shrink([false, true]).show(ui, |ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         for s in &found {
-            let text = egui::RichText::new(tl!(s.label)).size(12.5).color(t.text);
+            let text = egui::RichText::new(crate::branding::text(tl!(s.label)).into_owned()).size(12.5).color(t.text);
             let place = if s.section.is_empty() { tl!(s.category).to_string() } else { format!("{} › {}", tl!(s.category), tl!(s.section)) };
             let b = egui::Button::selectable(false, text).min_size(egui::vec2(180.0, 22.0));
             if ui.add(b).on_hover_text(&place).clicked() {
@@ -194,12 +197,21 @@ fn found_paint(ui: &mut egui::Ui, d: &mut Dialog, mark: Option<(egui::layers::Sh
     }
 }
 
+/// `field` of the Preferences dialog `d` is about to be `value` (a frame's edit or `ui.dialog.set`):
+/// choosing another General unit after Reset Preferences makes OK set the document's units again.
+pub(crate) fn note_set(d: &mut Dialog, field: &str, value: &Value) {
+    if field == "unitsGeneral" && d.fields.get(RESET_UNITS).is_some_and(|v| v != value) {
+        d.fields.remove(RESET_UNITS);
+    }
+}
+
 /// OK: validate and apply every preference in the dialog (nothing changes on error).
 pub fn confirm(app: &mut VectorcraftApp) -> Result<Value, String> {
     let Some(d) = app.ui.dialog.clone() else { return Err("no dialog open".into()) };
     let values: Map<String, Value> = d.fields.iter().filter(|(k, _)| !k.starts_with("__")).map(|(k, v)| (k.clone(), v.clone())).collect();
     let touch_ws = values.get("touchWorkspace").and_then(Value::as_bool);
-    app.run("prefs.set", json!({ "values": values }))?;
+    let document_units = d.fields.get(RESET_UNITS).is_none_or(|v| values.get("unitsGeneral") != Some(v));
+    app.run("prefs.set", json!({ "values": values, "documentUnits": document_units }))?;
     if touch_ws.is_some() {
         crate::workspaces::sync_touch_workspace(app, app.touch_screen);
     }
@@ -389,6 +401,21 @@ pub fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
         });
         ui.add_space(14.0);
         ui.horizontal(|ui| {
+            if widgets::secondary_button(ui, tl!("Export Preferences…")).on_hover_text(tl!("Save the applied preferences to a JSON file")).clicked()
+            {
+                export_preferences(app, &mut d);
+            }
+            // Not on the web, which has no open dialog that returns a file here.
+            if crate::picks::can(app, &crate::picks::PickRequest::Open(crate::FilePick::default()))
+                && widgets::secondary_button(ui, tl!("Import Preferences…"))
+                    .on_hover_text(tl!("Apply the preferences in a file Export Preferences saved"))
+                    .clicked()
+            {
+                import_preferences(app, &mut d);
+            }
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
             if widgets::secondary_button(ui, tl!("Reset Preferences"))
                 .on_hover_text(tl!("Restore every preference to its default (applied on OK)"))
                 .clicked()
@@ -414,10 +441,8 @@ pub fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
             });
         });
     });
-    if reset {
-        for (k, v) in Prefs::default().to_json().as_object().cloned().unwrap_or_default() {
-            d.fields.insert(k, v);
-        }
+    if let Some(v) = d.fields.get("unitsGeneral").cloned() {
+        note_set(&mut d, "unitsGeneral", &v);
     }
     // The setting a search went to stays highlighted until another category is shown.
     let found = d.str("__found");
@@ -430,7 +455,21 @@ pub fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
         app.ui.dialog = None;
     } else if ok && let Err(e) = confirm(app) {
         app.status(e);
+    } else if reset && !ok {
+        crate::dialogs::confirm::ask_reset_prefs(app);
     }
+}
+
+/// Reset Preferences, once its question is confirmed: every preference in the Preferences dialog
+/// `d` takes its default value. The category, the search and the UI-only rows stay as they were;
+/// nothing is applied until OK, which leaves the open document's units alone unless Units ›
+/// General is changed after the reset.
+pub(crate) fn reset_fields(d: &mut Dialog) {
+    for (k, v) in Prefs::default().to_json().as_object().cloned().unwrap_or_default() {
+        d.fields.insert(k, v);
+    }
+    // OK resets the Units ▸ General preference and leaves the open document's units alone.
+    d.fields.insert(RESET_UNITS.into(), d.fields.get("unitsGeneral").cloned().unwrap_or(Value::Null));
 }
 
 fn category_fields(ui: &mut egui::Ui, app: &mut VectorcraftApp, d: &mut Dialog, cat: &str) {
@@ -655,6 +694,67 @@ fn choose_folder(app: &mut VectorcraftApp, d: &mut Dialog, key: &'static str) {
     }
 }
 
+/// The file name Export Preferences… suggests.
+const PREFS_FILE_NAME: &str = "VectorCraft Preferences.json";
+
+/// Export Preferences…: the applied preferences (`prefs.export`) go to a file picked in a save
+/// dialog (the web downloads it). Changes in the dialog not yet applied with OK are not in it.
+fn export_preferences(app: &mut VectorcraftApp, d: &mut Dialog) {
+    let r =
+        crate::picks::in_app_dialog(app, d, |app, _| crate::io::save_command_output_named(app, "prefs.export", PREFS_FILE_NAME, json!({})).map(drop));
+    if let Err(e) = r
+        && e != "cancelled"
+    {
+        app.status(e);
+    }
+}
+
+/// Import Preferences…: the preferences in a file picked in an open dialog are applied
+/// (`prefs.import`), and the dialog shows them. On an error nothing changes and the status bar
+/// says why.
+fn import_preferences(app: &mut VectorcraftApp, d: &mut Dialog) {
+    let r = crate::picks::in_app_dialog(app, d, |app, d| {
+        let pick = crate::FilePick { filters: vec![crate::FilePick::filter("Preferences", &["json"])], ..Default::default() };
+        let Some(path) = crate::picks::open(app, &pick) else { return Ok(()) };
+        app.run("prefs.import", json!({ "path": path }))?;
+        show_prefs(d, &app.session.prefs.to_json());
+        app.status("Preferences imported.");
+        Ok(())
+    });
+    if let Err(e) = r {
+        app.status(e);
+    }
+}
+
+/// After `prefs.import`: the preferences are saved with the UI state, Enable Touch Workspace takes
+/// effect when the import changed it from `touch_workspace`, and an open Preferences dialog shows
+/// the imported values.
+pub(crate) fn imported(app: &mut VectorcraftApp, touch_workspace: bool) {
+    snapshot(app);
+    app.prefs_changed = true;
+    if app.session.prefs.touch_workspace != touch_workspace {
+        crate::workspaces::sync_touch_workspace(app, app.touch_screen);
+    }
+    let prefs = app.session.prefs.to_json();
+    if let Some(d) = app.ui.dialog.as_mut().filter(|d| d.kind == "preferences") {
+        show_prefs(d, &prefs);
+    }
+}
+
+/// The Preferences dialog `d` shows the preferences `prefs` in place of its working copy. Units ›
+/// General shows the preference, and OK then leaves the open document's units alone unless the
+/// field is changed.
+fn show_prefs(d: &mut Dialog, prefs: &Value) {
+    for (k, v) in prefs.as_object().into_iter().flatten() {
+        if d.fields.contains_key(k) {
+            d.fields.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(v) = d.fields.get("unitsGeneral").cloned() {
+        d.fields.insert(RESET_UNITS.into(), v);
+    }
+}
+
 /// Is one of the dialog's Units (General, Stroke, Type, East Asian Type) Picas?
 fn picas_in_use(d: &Dialog) -> bool {
     ["unitsGeneral", "unitsStroke", "unitsType", "unitsAsianType"].iter().any(|k| d.str(k) == vectorcraft_doc::Unit::Picas.key())
@@ -674,9 +774,9 @@ fn choice_row(ui: &mut egui::Ui, d: &mut Dialog, key: &str, label: &str, opts: &
 }
 
 fn bool_row(ui: &mut egui::Ui, d: &mut Dialog, key: &str, label: &str) {
-    // The app's outlined checkbox (it translates `label`): egui's own has no border at rest.
+    // Preference labels are app-owned wording; translate and brand before drawing.
     let on = d.bool(key);
-    if widgets::check(ui, label, on, ui.is_enabled()) {
+    if widgets::check(ui, &crate::branding::text(tl!(label)), on, ui.is_enabled()) {
         d.fields.insert(key.into(), json!(!on));
     }
 }

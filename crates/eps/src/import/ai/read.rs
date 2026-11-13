@@ -205,6 +205,10 @@ pub struct Structure {
     pub warped_type: super::envelope::WarpedType,
     /// The document's graphic styles are those of the file's style list, in place of the defaults.
     pub styles_read: bool,
+    /// The patterns that paint the text document's characters, placed in the document, by the
+    /// name of the art style that gives each: the styles that are one paint, a pattern this read
+    /// (see `ate::Texts::with_patterns`).
+    pub text_patterns: HashMap<String, Paint>,
     /// The file's `%AI24_LargeCanvasScale` (1 when it declares none), applied or not.
     pub canvas_scale: f64,
     /// The objects by their XML id (`AI10_ArtUID`), a text object by its slot's id: `None` for an
@@ -557,6 +561,9 @@ struct Reader<'a> {
     envelope_spent: super::envelope::Spent,
     /// The text objects read with a Warp ([`super::envelope::WarpedType`]).
     warped_type: Vec<super::envelope::WarpedLook>,
+    /// The envelopes of type read with their drawn art, settled once the type is laid out
+    /// ([`super::envelope::TypedEnvelope`]).
+    typed_envelopes: Vec<super::envelope::TypedEnvelope>,
     /// The live envelopes made so far and the drawn art each took the place of
     /// ([`Structure::envelopes_drawn`]).
     envelopes_drawn: Vec<(NodeId, Node)>,
@@ -769,6 +776,7 @@ impl<'a> Reader<'a> {
             envelope_checks: super::envelope::MAX_CHECKED,
             envelope_spent: super::envelope::Spent::default(),
             warped_type: Vec::new(),
+            typed_envelopes: Vec::new(),
             envelopes_drawn: Vec::new(),
             clip_fills: HashSet::new(),
             looks: HashSet::new(),

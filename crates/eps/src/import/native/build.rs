@@ -104,8 +104,7 @@ pub(super) type Built = Result<(Document, Vec<String>), String>;
 /// units ([`page_scale_alone`]). The document is drawn at that scale. Else `Err(structure)`, for
 /// [`build_from`] with the page.
 pub(super) fn build_without_page(structure: Structure, data: &[u8], pages: &[(f64, f64)], unit: f64) -> Result<Built, Box<Structure>> {
-    let Some(scale) = page_scale_alone(&structure, pages, unit).filter(|_| nothing_waits_on_page(&structure) && type_all_made(&structure, data))
-    else {
+    let Some(scale) = alone_scale(&structure, data, pages, unit) else {
         return Err(Box::new(structure));
     };
     let styles = structure.styles_read;
@@ -118,6 +117,12 @@ pub(super) fn build_without_page(structure: Structure, data: &[u8], pages: &[(f6
         (doc, notes)
     });
     Ok(built)
+}
+
+/// The scale [`build_without_page`] draws `structure` (the editing copy `data` read) at on `pages`
+/// in units of `unit` points, when it builds it without the page.
+pub(super) fn alone_scale(structure: &Structure, data: &[u8], pages: &[(f64, f64)], unit: f64) -> Option<f64> {
+    page_scale_alone(structure, pages, unit).filter(|_| nothing_waits_on_page(structure) && type_all_made(structure, data))
 }
 
 /// Is nothing in `structure` waiting on the page: no object unread (the page's art takes its
@@ -186,6 +191,36 @@ fn left_out_of_comparisons(page: Page, mut restyled: Vec<Rect>, placeholders: Ve
     restyled
 }
 
+/// A single PDF page capped at the format's 14,400-unit limit, without user-space scaling.
+/// The other dimension must still match; unrelated page-size mismatches remain errors.
+fn capped_pdf_page(doc: &Document, visible: &Document, board: Rect, page: Rect, unit: f64) -> bool {
+    let capped = |side: f64, pdf: f64| (pdf - 14_400.0).abs() <= 0.5 && side > pdf + 0.5;
+    let matching = |side: f64, pdf: f64| (side - pdf).abs() <= 0.5 || capped(side, pdf);
+    unit == 1.0
+        && doc.artboards.len() == 1
+        && visible.artboards.len() == 1
+        && (capped(board.width(), page.width()) || capped(board.height(), page.height()))
+        && matching(board.width(), page.width())
+        && matching(board.height(), page.height())
+}
+/// The PDF-covered area of a trusted oversized artboard; its full artboard stays in the document.
+fn compared_page_rect(
+    doc: &Document,
+    visible: &Document,
+    board: Rect,
+    pdf: Rect,
+    trusted_page: Option<Page>,
+    unit: f64,
+    warnings: &mut Vec<String>,
+) -> Rect {
+    if matches!(trusted_page, Some(Page::Artboard)) && capped_pdf_page(doc, visible, board, pdf, unit) {
+        warnings.push("the editing data's artboard is larger than the PDF page: the full artboard comes from its editing data".into());
+        Rect::new(board.x0, board.y0, board.x0 + pdf.width(), board.y0 + pdf.height())
+    } else {
+        board
+    }
+}
+
 /// [`build`] from `structure`, the editing copy `data` already read.
 pub(super) fn build_from(
     structure: Structure,
@@ -212,12 +247,13 @@ pub(super) fn build_from(
         placed_pages,
         envelopes_drawn,
         styles_read,
+        text_patterns,
         canvas_scale,
         xml_ids,
         bindings,
         bindings_skipped,
         warped_type,
-        warnings,
+        mut warnings,
     } = structure;
     let mut restyled = left_out_of_comparisons(page, restyled, placeholders);
     // Editing data in the units of the page's user space ([`in_units`]), or at its declared large
@@ -265,6 +301,7 @@ pub(super) fn build_from(
         {
             (rect, cropped) = (art, true);
         }
+        rect = compared_page_rect(&doc, visible, rect, page_rect, trust.then_some(page), unit, &mut warnings);
         if !fits(&rect) {
             // Both sizes in points as the fields show them, and the editing data's page to the
             // file's as a scale (1:10 is a tenth of its size) when its sides are in proportion and
@@ -369,7 +406,7 @@ pub(super) fn build_from(
     // The page's type that needs no text object of the layers: the layers' own legacy text, or
     // placed files that show it.
     let as_outlines = page_type_elsewhere(infos.is_empty(), infos.iter().all(|i| !i.shown), &mut shown, &mut hidden, &doc, &placed_elsewhere)?;
-    let texts = Texts::read(data);
+    let texts = Texts::read(data).map(|t| t.with_patterns(text_patterns));
     // Each story is read once, however many text objects name it.
     let mut read: std::collections::BTreeMap<u32, Option<Arc<Story>>> = Default::default();
     let stories: Vec<Option<Arc<Story>>> = infos
@@ -424,8 +461,20 @@ pub(super) fn build_from(
     }
     // Area type flows around the wrap objects above it before it is compared with the page.
     resolve_text_wrap(&mut doc)?;
-    let bound_text = text_bound_slots(&doc, &bindings, &xml_ids);
-    settle_warped_type(warped_type, &mut doc, &filled, &threaded_frames, &bound_text, &mut restyled, &mut notes)?;
+    let bound_text = bound_slots(&doc, &bindings, &xml_ids, VariableKind::Text);
+    let bound_visible = bound_slots(&doc, &bindings, &xml_ids, VariableKind::Visibility);
+    // Without a page to compare the layers with, envelopes of type keep their drawn art: like the
+    // other live envelopes, one opens live only where the layers with it draw as the page.
+    let warped_type = warped_type.compared(frame.is_some(), &mut notes);
+    let bound = [&bound_text, &bound_visible];
+    let typed = settle_warped_type(warped_type, &mut doc, &filled, &threaded_frames, bound, &mut restyled, &mut notes)?;
+    // The live envelopes and what takes the place of each again, when the layers with them don't
+    // draw as the page, with the note that says so.
+    let envelopes_drawn: Vec<(NodeId, Vec<Node>, &str)> = envelopes_drawn
+        .into_iter()
+        .map(|(id, art)| (id, vec![art], ai::ENVELOPE_DRAWN))
+        .chain(typed.into_iter().map(|(id, nodes)| (id, nodes, ai::ENVELOPE_TYPE_DRAWN)))
+        .collect();
     if empty > 0 {
         notes.push(format!("{empty} {}", if frame.is_some() { TEXT_LEFT_OUT } else { TYPE_LEFT_OUT }));
     }
@@ -478,9 +527,14 @@ pub(super) fn build_from(
                     other => match drawn_or_trusted(&frame, &mut view, &mut doc, &envelopes_drawn, &notes, unseen, trust, why, reflow) {
                         Ok(more) => notes.extend(more),
                         // The objects that draw differently from the page come in as its art, from
-                        // the placement that draws closer to it.
+                        // the placement that draws closer to it. The layers don't draw as the page:
+                        // envelopes of type keep their drawn art and their type, hidden.
                         Err(why) => {
-                            let other = other.map(|(_, other, unseen)| (other, unseen));
+                            let typed = type_drawn(&mut doc, &envelopes_drawn);
+                            let other = other.map(|(_, mut other, unseen)| {
+                                type_drawn(&mut other, &envelopes_drawn);
+                                (other, unseen)
+                            });
                             let placements = closer_first(&frame, &mut view, (doc, unseen), other, reflow);
                             let Some((kept, unseen, kept_notes)) = placements.into_iter().find_map(|(base, unseen)| {
                                 keep_differing(&base, &frame, &mut view, &threaded_frames, &shown, reflow).map(|(kept, n)| (kept, unseen, n))
@@ -488,7 +542,8 @@ pub(super) fn build_from(
                                 return Err(why);
                             };
                             doc = kept;
-                            notes.extend(unseen_note(unseen).into_iter().chain(kept_notes));
+                            let typed = typed.then(|| ai::ENVELOPE_TYPE_DRAWN.to_string()).filter(|n| !notes.contains(n));
+                            notes.extend(typed.into_iter().chain(unseen_note(unseen)).chain(kept_notes));
                         }
                     },
                 },
@@ -616,40 +671,69 @@ fn bind_variables(
     notes.extend(ai::bindings_note(skipped));
 }
 
-/// The text object slots of `doc` that `bindings` binds to a text variable, each named by its XML id
-/// (`ids`).
-fn text_bound_slots(doc: &Document, bindings: &[ai::BindingRef], ids: &std::collections::HashMap<String, Option<NodeId>>) -> BTreeSet<NodeId> {
+/// The objects of `doc`, text object slots among them, that `bindings` binds to a variable of
+/// `kind`, each named by its XML id (`ids`).
+fn bound_slots(
+    doc: &Document,
+    bindings: &[ai::BindingRef],
+    ids: &std::collections::HashMap<String, Option<NodeId>>,
+    kind: VariableKind,
+) -> BTreeSet<NodeId> {
     bindings
         .iter()
-        .filter(|b| doc.variables.variable(&b.variable).is_some_and(|v| v.kind == VariableKind::Text))
+        .filter(|b| doc.variables.variable(&b.variable).is_some_and(|v| v.kind == kind))
         .filter_map(|b| b.target.as_ref().and_then(|t| ids.get(t).copied().flatten()))
         .collect()
 }
 
 /// Warped type stays type where its live warp draws as its look, and where a text variable binds it
-/// (`bound_text`, by slot). Elsewhere the look takes its place, and one note says how many did.
+/// (`bound`'s first set, by slot). Elsewhere the look takes its place, and one note says how many did.
 /// `filled` says what each slot became, and the comparisons with the page leave out the boxes in
 /// `restyled`. Fails as [`resolve_text_wrap`] does when the looks give the wrap shapes too many
-/// anchors.
+/// anchors. Before that, the envelopes of type open live where they draw as their drawn art, with
+/// the type of their text slots (made type, one text object for the slot, not threaded, bound to
+/// no text variable and no visibility variable, `bound`'s second set, and no wrap object); the
+/// others keep their drawn art, with a note. Returns each live envelope of type's id with what
+/// takes its place again (its hidden type, then its drawn art).
 fn settle_warped_type(
-    warped: ai::WarpedType,
+    mut warped: ai::WarpedType,
     doc: &mut Document,
     filled: &std::collections::HashMap<NodeId, Filled>,
     threaded: &BTreeSet<NodeId>,
-    bound_text: &BTreeSet<NodeId>,
+    bound: [&BTreeSet<NodeId>; 2],
     restyled: &mut Vec<Rect>,
     notes: &mut Vec<String>,
-) -> Result<(), String> {
+) -> Result<Vec<(NodeId, Vec<Node>)>, String> {
+    let [bound_text, bound_visible] = bound;
     let made = |slot| match filled.get(&slot).map(|f| f.text.as_slice()).filter(|_| !bound_text.contains(&slot)) {
         Some(&[one]) => Some(one),
         _ => None,
     };
+    // An envelope's type: the one text object a slot became (hidden, with nothing else), named as
+    // the slot (made type is no longer weighed against the page: the envelope draws it). A variable
+    // binds the hidden text object a slot became, which the live envelope's type takes the place of
+    // with an id of its own: a slot bound to one keeps its type hidden, and the drawn art stays.
+    let type_of = |doc: &Document, slot: NodeId| {
+        if bound_visible.contains(&slot) {
+            return None;
+        }
+        let id = made(slot).filter(|id| !threaded.contains(id) && filled.get(&slot).is_some_and(|f| f.objects == [*id]))?;
+        let mut text = doc.node(id).filter(|n| matches!(n.kind, NodeKind::Text(_)) && n.extras().wrap.is_none())?.clone();
+        if let Some(name) = text.name.as_deref().and_then(|n| n.strip_prefix(MADE)) {
+            text.name = (!name.is_empty()).then(|| name.to_string());
+        }
+        Some((id, text))
+    };
+    let typed = warped.settle_envelopes(doc, type_of);
+    if !typed.kept.is_empty() && !notes.iter().any(|n| n == ai::ENVELOPE_TYPE_DRAWN) {
+        notes.push(ai::ENVELOPE_TYPE_DRAWN.into());
+    }
     let replaced = warped.settle(doc, made, threaded, restyled);
     if replaced > 0 {
         notes.push(format!("{}: {replaced}", ai::WARPED_TYPE_DRAWN));
         resolve_text_wrap(doc)?;
     }
-    Ok(())
+    Ok(typed.put_back)
 }
 
 /// Most anchors copied into the wrap shapes of a file's area type ([`vectorcraft_doc::text::wrap_work`]).
@@ -1254,14 +1338,15 @@ fn slot_content(
 /// The layers `doc` don't draw as the page (`why`), `unseen` text objects of them taken out: the
 /// notes to add when `doc` with each live envelope `drawn` lists replaced by the drawn art it took
 /// the place of (see [`ai::Structure::envelopes_drawn`]) draws as the page, `doc` then being that;
-/// else, with `trust`, the notes for `doc` as it is. An error, `why`, otherwise. The envelope note
-/// is added unless `notes` has it.
+/// else, with `trust`, the notes for `doc` as it is but for its envelopes of type, which keep their
+/// drawn art ([`type_drawn`]). An error, `why`, otherwise. The envelope note is added unless
+/// `notes` has it.
 #[allow(clippy::too_many_arguments)]
 fn drawn_or_trusted(
     frame: &Frame<'_>,
     view: &mut PageView,
     doc: &mut Document,
-    drawn: &[(NodeId, Node)],
+    drawn: &[(NodeId, Vec<Node>, &str)],
     notes: &[String],
     unseen: usize,
     trust: bool,
@@ -1270,25 +1355,59 @@ fn drawn_or_trusted(
 ) -> Result<Vec<String>, String> {
     let unseen_note = |n: usize| (n > 0).then(|| format!("{n} {UNSEEN_TEXT}"));
     let mut put_back = doc.clone();
-    let mut any = false;
-    for (id, art) in drawn {
-        if let Some(n) = put_back.node_mut(*id) {
-            *n = art.clone();
-            any = true;
-        }
+    // Each envelope still there, in place of the art it took the place of.
+    let there: Vec<&(NodeId, Vec<Node>, &str)> = drawn.iter().filter(|(id, ..)| put_back.node(*id).is_some()).collect();
+    // One inside another's art goes with it: only the outermost are put back (a place inside
+    // another place fails the whole put-back).
+    let mut inside = std::collections::HashSet::new();
+    for n in there.iter().filter_map(|(id, ..)| put_back.node(*id)) {
+        n.walk(&mut |c| {
+            if c.id != n.id {
+                inside.insert(c.id);
+            }
+        });
     }
+    let outermost = there.iter().filter(|(id, ..)| !inside.contains(id)).map(|(id, art, _)| (*id, art.clone())).collect();
+    let any = !there.is_empty() && put_back.insert_beside(outermost, true).is_ok();
     if any {
         let more = prune_unseen(frame, view, &mut put_back, reflow);
         if let Ok(note) = compare(frame, view, &put_back, reflow) {
             *doc = put_back;
-            let envelope = (!notes.iter().any(|n| n == ai::ENVELOPE_DRAWN)).then(|| ai::ENVELOPE_DRAWN.to_string());
+            let mut envelope: Vec<String> = vec![];
+            for (.., say) in there {
+                if !notes.iter().chain(&envelope).any(|n| n == say) {
+                    envelope.push(say.to_string());
+                }
+            }
             return Ok(envelope.into_iter().chain(unseen_note(unseen + more)).chain(note).collect());
         }
     }
     if trust {
-        return Ok(unseen_note(unseen).into_iter().chain([format!("{why}: they come from its editing data all the same")]).collect());
+        let typed = type_drawn(doc, drawn).then(|| ai::ENVELOPE_TYPE_DRAWN.to_string()).filter(|n| !notes.contains(n));
+        let trusted = format!("{why}: they come from its editing data all the same");
+        return Ok(typed.into_iter().chain(unseen_note(unseen)).chain([trusted]).collect());
     }
     Err(why)
+}
+
+/// Put each live envelope of type in `drawn` (as [`drawn_or_trusted`] takes them) that `doc` still
+/// has back as its hidden type and its drawn art: whether one was. An envelope of type opens live
+/// only where the layers with it draw as the page, so where they don't, though they are used all
+/// the same (the editing data trusted, or the objects that differ come in as the page's art), it
+/// keeps its drawn art.
+fn type_drawn(doc: &mut Document, drawn: &[(NodeId, Vec<Node>, &str)]) -> bool {
+    let typed: Vec<(NodeId, Vec<Node>)> = drawn
+        .iter()
+        .filter(|(id, _, say)| *say == ai::ENVELOPE_TYPE_DRAWN && doc.node(*id).is_some())
+        .map(|(id, art, _)| (*id, art.clone()))
+        .collect();
+    if typed.is_empty() || doc.insert_beside(typed, true).is_err() {
+        return false;
+    }
+    // The type put back is still marked as made from the text document, which the rest no longer
+    // is once the page has weighed it ([`prune_unseen`]).
+    unmark(&mut doc.layers, true, true, &mut vec![]);
+    true
 }
 
 /// `doc` with the placed files `placed` lists at their other placement (see
@@ -1582,7 +1701,7 @@ fn page_boards(doc: &Document, visible: &Document, first: usize, pages: &[Rect])
 /// Drops the guides of artboards `doc` no longer has: an artboard guide goes with its artboard.
 fn drop_guides_off_boards(doc: &mut Document) {
     let kept: Vec<u32> = doc.artboards.iter().map(|a| a.id).collect();
-    doc.guides.retain(|g| g.artboard.is_none_or(|id| kept.contains(&id)));
+    doc.retain_guides(&mut vectorcraft_doc::Selection::default(), |g| g.artboard.is_none_or(|id| kept.contains(&id)));
 }
 
 /// Draw `doc`'s layers, artboards and guides `k` times as large, from the origin, with their
@@ -1595,12 +1714,11 @@ pub(crate) fn scale_document(doc: &mut Document, k: f64, styles: bool) {
         let layer = Arc::make_mut(layer);
         layer.transform(a, scaling);
         scale_wrap_offsets(layer, k);
+        // A transform leaves ruler guides where they are: their positions scale here.
+        layer.map_ruler_guide_positions(&mut |_, pos| *pos *= k);
     }
     for board in &mut doc.artboards {
         board.rect = a.transform_rect_bbox(board.rect);
-    }
-    for guide in &mut doc.guides {
-        guide.pos *= k;
     }
     if styles {
         for g in doc.graphic_styles.iter_mut() {
@@ -2000,7 +2118,7 @@ mod candidate_tests {
             let warped = ai::WarpedType::unchecked(vec![(id, (*look).clone())]);
             let filled = std::collections::HashMap::from([(id, Filled { text: vec![id], objects: vec![id] })]);
             let mut notes = vec![];
-            let settled = settle_warped_type(warped, &mut doc, &filled, &BTreeSet::new(), &BTreeSet::new(), &mut vec![], &mut notes);
+            let settled = settle_warped_type(warped, &mut doc, &filled, &BTreeSet::new(), [&BTreeSet::new(); 2], &mut vec![], &mut notes);
             assert_eq!(settled.is_ok(), ok, "{texts} text objects");
             assert_eq!(notes, ["warped text objects that came in as drawn art, not as editable type: 1"]);
         }
