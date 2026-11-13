@@ -3,11 +3,52 @@
   "source_sha": "eea899cf9bc815f297863f2f31054b2118777ddc",
   "version": "0.24.2",
   "trigger": "refs/tags/fork-release/v0.24.2-attempt.2",
-  "status": "running",
+  "status": "success",
   "run_id": "43388850865",
   "run_attempt": "1",
   "run_url": "https://github.com/frangled123/vectorcraft/actions/runs/43388850865",
-  "updated_utc": "2026-11-13T07:52:48.460359+00:00",
-  "steps": {},
-  "assets": []
+  "updated_utc": "2026-11-13T08:54:09.995235+00:00",
+  "steps": {
+    "source": {
+      "outcome": "success",
+      "conclusion": "success"
+    },
+    "inputs": {
+      "outcome": "success",
+      "conclusion": "success"
+    },
+    "translations": {
+      "outcome": "success",
+      "conclusion": "success"
+    },
+    "build": {
+      "outcome": "success",
+      "conclusion": "success"
+    },
+    "packages": {
+      "outcome": "success",
+      "conclusion": "success"
+    },
+    "release": {
+      "outcome": "success",
+      "conclusion": "success"
+    }
+  },
+  "assets": [
+    {
+      "name": "SHA256SUMS.txt",
+      "size": 198,
+      "sha256": "042f2f28df00a954d1a284e9bd84ff2860108b2d1db3b40da468822284d39fee"
+    },
+    {
+      "name": "nodus-0.24.2-macos-aarch64.dmg",
+      "size": 97280101,
+      "sha256": "264b707d80584fc1fa1f06d17c9b4d7e6b0c29ea9888fe7ad013a068eb3ebba5"
+    },
+    {
+      "name": "nodus-cli-0.24.2-macos-aarch64.zip",
+      "size": 73018889,
+      "sha256": "afc0b68a595769783396981237a0a229c63162b6f39df4550e39564d35bf5bf5"
+    }
+  ]
 }

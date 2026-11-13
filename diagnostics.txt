@@ -1,0 +1,154 @@
+fork-public-build.log
+   Compiling tempfile v3.27.0
+   Compiling craft-i18n v0.1.0 (https://github.com/storytold/craft-libs?rev=c4b8405d5fd8f29cf77de528206bd2b38bb0ecb6#c4b8405d)
+   Compiling ureq v3.5.0
+   Compiling plist v1.10.3
+   Compiling enum-map v3.1.0
+   Compiling idna v1.1.0
+   Compiling resvg v0.45.1
+   Compiling accesskit_winit v0.34.1
+   Compiling form_urlencoded v1.2.2
+   Compiling winresource v0.1.34
+   Compiling arboard v3.7.0
+   Compiling rfd v0.17.2
+   Compiling muda v0.21.2
+   Compiling craft-ui v0.1.0 (https://github.com/storytold/craft-libs?rev=c4b8405d5fd8f29cf77de528206bd2b38bb0ecb6#c4b8405d)
+   Compiling craft-update v0.1.0 (https://github.com/storytold/craft-libs?rev=e98299546f5c5c3c22388d16507f8b5e61a5f280#e9829954)
+   Compiling egui-wgpu v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)
+   Compiling egui-winit v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)
+   Compiling vectorcraft v0.24.2 (/Users/runner/work/vectorcraft/vectorcraft/apps/vectorcraft)
+   Compiling url v2.5.8
+   Compiling egui_extras v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)
+   Compiling craft-keymap v0.1.0 (https://github.com/storytold/craft-libs?rev=9be9a63782298ab59cd9b7a42ee9cba4f42a5ccb#9be9a637)
+   Compiling dispatch2 v0.3.1
+   Compiling objc2-core-text v0.3.2
+   Compiling keyboard-types v0.8.3
+   Compiling craft-winprint-gdi v0.1.0 (https://github.com/storytold/winprint.rs?rev=417ac3c4d14d3da5485a99c7d5ce8f05664ec312#417ac3c4)
+   Compiling craft-print v0.1.0 (https://github.com/storytold/craft-libs?rev=9be9a63782298ab59cd9b7a42ee9cba4f42a5ccb#9be9a637)
+   Compiling eframe v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)
+   Compiling vectorcraft-ui-egui v0.24.2 (/Users/runner/work/vectorcraft/vectorcraft/crates/ui-egui)
+   Compiling webbrowser v1.2.5
+   Compiling vectorcraft-mcp v0.24.2 (/Users/runner/work/vectorcraft/vectorcraft/crates/mcp)
+   Compiling craft-window v0.1.0 (https://github.com/storytold/craft-libs?rev=9be9a63782298ab59cd9b7a42ee9cba4f42a5ccb#9be9a637)
+   Compiling vectorcraft-cli v0.24.2 (/Users/runner/work/vectorcraft/vectorcraft/apps/vectorcraft-cli)
+    Finished `release` profile [optimized] target(s) in 24m 14s
+Non-fat file: /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/bin/vectorcraft is architecture: arm64
+Non-fat file: /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/bin/vectorcraft-cli is architecture: arm64
+==> assembling /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/Nodus.app
+/* com.apple.actool.compilation-results */
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tmp.qirZVd8LcT/Assets.car
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tmp.qirZVd8LcT/Nodus.icns
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tmp.qirZVd8LcT/icon-info.plist
+
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/Nodus.app/Contents/Info.plist: OK
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/Nodus.app/Contents/MacOS/Nodus: replacing existing signature
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/Nodus.app: replacing existing signature
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/Nodus.app: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/Nodus.app: satisfies its Designated Requirement
+==> building /Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-0.24.2-macos-aarch64.dmg
+created: /Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-0.24.2-macos-aarch64.dmg
+/Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-0.24.2-macos-aarch64.dmg: valid on disk
+/Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-0.24.2-macos-aarch64.dmg: satisfies its Designated Requirement
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/dmg-check/Nodus.app: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/dmg-check/Nodus.app: satisfies its Designated Requirement
+==> building /Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-cli-0.24.2-macos-aarch64.zip
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/nodus-cli-0.24.2-macos-aarch64/vectorcraft-cli: replacing existing signature
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/nodus-cli-0.24.2-macos-aarch64/vectorcraft-cli: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T//nodus-package.MFFfTx/nodus-cli-0.24.2-macos-aarch64/vectorcraft-cli: satisfies its Designated Requirement
+vectorcraft-cli 0.24.2
+==> done
+-rw-r--r--@ 1 runner  staff    93M Nov 13 08:53 /Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-0.24.2-macos-aarch64.dmg
+-rw-r--r--  1 runner  staff    70M Nov 13 08:53 /Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-cli-0.24.2-macos-aarch64.zip
+
+fork-public-inputs.log
+From https://github.com/storytold/craft-fonts
+ * branch            b076417b5880bd4154bd22f00695b1d28c6bea83 -> FETCH_HEAD
+HEAD is now at b076417 Add verified Devanagari fallback for Hindi UI text
+From https://github.com/storytold/craft-i18n
+ * branch            e02939ef009218e81c44e8ec001fbb7603461de4 -> FETCH_HEAD
+HEAD is now at e02939e Merge pull request #216 from storytold/sync/photocraft-12403
+Verified pinned inputs and 14 font files with OFL notices
+
+fork-public-packages.log
+/Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-0.24.2-macos-aarch64.dmg: valid on disk
+/Users/runner/work/vectorcraft/vectorcraft/dist/release/nodus-0.24.2-macos-aarch64.dmg: satisfies its Designated Requirement
+expected   CRC32 $30496880
+/dev/disk31         	GUID_partition_scheme          	
+/dev/disk31s1       	Apple_HFS                      	/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/mount
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/mount/Nodus.app: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/mount/Nodus.app: satisfies its Designated Requirement
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/mount/Nodus.app/Contents/MacOS/Nodus: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/mount/Nodus.app/Contents/MacOS/Nodus: satisfies its Designated Requirement
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/Nodus.app: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/Nodus.app: satisfies its Designated Requirement
+"disk31" ejected.
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/cli/nodus-cli-0.24.2-macos-aarch64/vectorcraft-cli: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/fork-verify-8nsgvgvf/cli/nodus-cli-0.24.2-macos-aarch64/vectorcraft-cli: satisfies its Designated Requirement
+nodus-0.24.2-macos-aarch64.dmg 97280101 264b707d80584fc1fa1f06d17c9b4d7e6b0c29ea9888fe7ad013a068eb3ebba5
+nodus-cli-0.24.2-macos-aarch64.zip 73018889 afc0b68a595769783396981237a0a229c63162b6f39df4550e39564d35bf5bf5
+Verified thin ARM executables, strict ad-hoc signatures, installed copy, version, icons, licences and hashes
+
+fork-public-release.log
+https://github.com/frangled123/vectorcraft/releases/tag/v0.24.2
+
+fork-public-translations.log
+test i18n::tests::plugin_error_reasons_are_translated_with_the_error ... ok
+test i18n::tests::plugin_errors_translate_with_their_values ... ok
+test i18n::tests::partial_catalogs_only_translate_strings_the_ui_shows ... ok
+test i18n::tests::parameter_schema_errors_are_translated ... ok
+test i18n::tests::plurals_and_placeholders ... ok
+test i18n::tests::polish_plurals_have_three_forms ... ok
+test i18n::tests::postscript_errors_keep_their_name_and_meaning ... ok
+test i18n::tests::preferences_resolve_with_fallback ... ok
+test i18n::tests::recolor_notes_on_objects_left_unchanged_translate_with_their_counts ... ok
+test i18n::tests::render_site_labels_fall_back_to_english ... ok
+test i18n::tests::russian_plurals_have_three_forms ... ok
+test i18n::tests::saved_tracing_preset_errors_are_translated ... ok
+test i18n::tests::script_console_counts_take_each_language_s_form ... ok
+test i18n::tests::plugin_messages_are_translated_in_every_complete_catalog ... ok
+test i18n::tests::plugin_limit_errors_are_translated ... ok
+test i18n::tests::script_errors_are_translated ... ok
+test i18n::tests::spaced_catalogs_keep_the_spaces_around_fragments ... ok
+test i18n::tests::tags_map_to_languages ... ok
+test i18n::tests::templates_that_start_with_text_match_first ... ok
+test i18n::tests::the_engine_follows_the_interface_language ... ok
+test i18n::tests::the_keep_colors_trace_warnings_are_translated ... ok
+test i18n::tests::script_host_errors_are_translated ... ok
+test i18n::tests::translated_messages_keep_the_bare_literals_of_their_english ... ok
+test i18n::tests::translated_messages_keep_the_double_quoted_values_of_their_english ... ok
+test i18n::tests::translated_messages_keep_the_command_ids_their_english_names ... ok
+test i18n::tests::translated_messages_keep_the_keys_and_values_their_english_names ... ok
+test i18n::tests::ukrainian_plurals_have_three_forms ... ok
+test i18n::tests::translations_keep_the_backticked_names_of_their_english ... ok
+test i18n::tests::warped_type_note_is_translated ... ok
+test i18n::tests::wrongly_shaped_plugin_commands_errors_are_translated ... ok
+test i18n::tests::zh_hans_is_simplified_and_mainland ... ok
+test i18n::tests::zh_hant_has_no_simplified_characters ... ok
+test i18n::tests::shared_param_check_errors_show_their_values_as_given ... ok
+test i18n::tests::untranslated_report ... ok
+
+test result: ok. 94 passed; 0 failed; 0 ignored; 0 measured; 4244 filtered out; finished in 5.42s
+
+warning: patch `egui_demo_lib v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)` was not used in the crate graph
+warning: patch `egui_inspection v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)` was not used in the crate graph
+warning: patch `egui_system_font_provider v0.37.0 (https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc7)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+warning: vectorcraft-text@0.24.2: web build won't fetch: Cairo Regular, Tajawal ExtraLight, Tajawal Light, Tajawal Regular, Tajawal Medium, Tajawal Bold, Tajawal ExtraBold, Tajawal Black, Almarai Light, Almarai Regular, Almarai Bold, Almarai ExtraBold, IBM Plex Sans Arabic Thin, IBM Plex Sans Arabic ExtraLight, IBM Plex Sans Arabic Light, IBM Plex Sans Arabic Regular, IBM Plex Sans Arabic Medium, IBM Plex Sans Arabic SemiBold, IBM Plex Sans Arabic Bold, Noto Kufi Arabic Regular, Amiri Regular, Amiri Italic, Amiri Bold, Amiri Bold Italic, Alexandria Regular, Fustat Regular, Reem Kufi Regular, Aref Ruqaa Regular, Aref Ruqaa Bold, Gulzar Regular not in CRAFT_FONTS_DIR=/Users/runner/work/_temp/fork-inputs/craft-fonts (an older craft-fonts?)
+    Finished `release` profile [optimized] target(s) in 3.95s
+     Running unittests src/lib.rs (target/aarch64-apple-darwin/release/deps/vectorcraft_ui_egui-f2046f03e2c6566e)
+
+running 8 tests
+test brand::tests::the_icon_decodes_to_a_rounded_128_px_tile ... ok
+test brand::tests::shared_ribbon_renders_in_both_themes_without_image_loaders ... ok
+test brand::tests::theme_switch_selects_and_reuses_the_matching_texture ... ok
+test branding::fork_release_tests::updates_use_the_fork_and_accept_the_packaged_artifact_stem ... ok
+test branding::tests::fork_labels_localize_without_renaming_upstream_or_user_content ... ok
+test branding::fork_release_tests::macos_declares_every_registered_interface_language ... ok
+test branding::tests::product_names_change_after_translation_but_normal_text_stays_borrowed ... ok
+test brand::tests::the_app_bar_paints_the_icon_from_one_cached_texture ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 4330 filtered out; finished in 0.05s
+
